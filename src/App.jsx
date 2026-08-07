@@ -198,9 +198,14 @@ OUTPUT FORMAT (copy this exactly, fill in values):
 }
 
 async function parseBrainDump(text, todayKey) {
+  const DAYS_ORDER = ["mon","tue","wed","thu","fri","sat","sun"];
+  const todayIndex = DAYS_ORDER.indexOf(todayKey);
+  const validFutureDays = DAYS_ORDER.slice(todayIndex).join(", ");
+
   const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON array. No prose, no explanation, no markdown, no backticks, no commentary before or after. Just the raw JSON array starting with [ and ending with ]. Any text outside the array will break the parser.
 
-Today is ${todayKey}. Week: mon tue wed thu fri sat sun.
+Today is ${todayKey}. The ONLY valid days to schedule tasks are: ${validFutureDays}, or "backlog".
+CRITICAL: Do NOT assign any task to a day that comes before ${todayKey} in the week. Any day before ${todayKey} is in the past — use "backlog" instead.
 
 Raw notes to convert into tasks:
 """${text}"""
@@ -210,11 +215,11 @@ Rules:
 - Skip vague filler
 - Classify each: trivial/easy/medium/hard/epic
 - Estimate minutes: 1-240
-- Pick a day (mon/tue/wed/thu/fri/sat/sun) or "backlog" — spread across the week
+- Spread tasks across the valid future days listed above, or use "backlog" if no clear deadline
 - Do NOT add explanations
 
 OUTPUT FORMAT (a JSON array, nothing else):
-[{"title":"task name","difficulty":"easy","estMinutes":15,"day":"mon"}]`, 45000);
+[{"title":"task name","difficulty":"easy","estMinutes":15,"day":"${todayKey}"}]`, 45000);
   const parsed = JSON.parse(clean);
   if (!Array.isArray(parsed)) throw new Error("bad response");
   const validDays = new Set(["backlog", ...DAYS.map((d) => d.key)]);
