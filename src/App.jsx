@@ -141,11 +141,31 @@ function emptyDayCounts() { return Object.fromEntries(DAYS.map((d) => [d.key, 0]
 function emptyDiffCounts() { return Object.fromEntries(DIFFICULTIES.map((d) => [d.key, 0])); }
 function extractJson(text) {
   const cleaned = text.replace(/```json|```/g, "").trim();
-  // Try to find a JSON array first, then object
+  // Try clean array first
   const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (arrayMatch) return arrayMatch[0];
+  if (arrayMatch) {
+    try { JSON.parse(arrayMatch[0]); return arrayMatch[0]; } catch (_) {}
+  }
+  // Try clean object
   const objMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (objMatch) return objMatch[0];
+  if (objMatch) {
+    try { JSON.parse(objMatch[0]); return objMatch[0]; } catch (_) {}
+  }
+  // Truncated array — extract complete items only
+  if (cleaned.includes("[")) {
+    const start = cleaned.indexOf("[");
+    const partial = cleaned.slice(start);
+    const items = [];
+    let depth = 0, inStr = false, itemStart = -1;
+    for (let i = 0; i < partial.length; i++) {
+      const c = partial[i];
+      if (c === '"' && partial[i-1] !== "\\") inStr = !inStr;
+      if (inStr) continue;
+      if (c === "{") { if (depth === 0) itemStart = i; depth++; }
+      if (c === "}") { depth--; if (depth === 0 && itemStart !== -1) { try { const obj = JSON.parse(partial.slice(itemStart, i+1)); items.push(obj); } catch(_) {} itemStart = -1; } }
+    }
+    if (items.length > 0) return JSON.stringify(items);
+  }
   return cleaned;
 }
 
@@ -160,7 +180,7 @@ async function callQuestAI(prompt, timeoutMs = 60000) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 1500 },
+        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
       }),
       signal: controller.signal,
     });
