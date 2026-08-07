@@ -816,7 +816,7 @@ export default function App() {
 
   // ---- Render ----
   return (
-    <div style={{ minHeight: "100vh", background: "#1B2430", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 60 }}>
+    <div className="safe-top safe-bottom" style={{ minHeight: "100vh", background: "#1B2430", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 60 }}>
       <style>{`
         * { box-sizing: border-box; }
         .qlog-btn { transition: transform 0.12s ease; }
