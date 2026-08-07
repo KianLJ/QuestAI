@@ -211,27 +211,36 @@ Raw notes to convert into tasks:
 """${text}"""
 
 Rules:
-- Split into max 12 distinct actionable tasks
+- Split into max 12 distinct actionable tasks (across all entries including any splits)
 - Skip vague filler
 - Classify each: trivial/easy/medium/hard/epic
-- Estimate minutes: 1-240
-- Spread tasks across the valid future days listed above, or use "backlog" if no clear deadline
-- Do NOT add explanations
+- Estimate minutes per session: 1-240
+- Add a short reason (max 6 words) explaining why you classified it that way
+- Spread tasks across the valid future days above, or use "backlog" if no clear deadline
+- SMART SPLITTING: If a task is large, ongoing, or benefits from being done in multiple shorter sessions across different days (e.g. "finish reading book", "study for exam", "write essay"), split it into 2-3 separate entries with slightly different titles (e.g. "Read book — session 1", "Read book — session 2") on different days. Only split when it genuinely makes sense — don't split quick one-off tasks.
+- Do NOT add explanations outside the JSON
 
 OUTPUT FORMAT (a JSON array, nothing else):
-[{"title":"task name","difficulty":"easy","estMinutes":15,"day":"${todayKey}"}]`, 45000);
+[{"title":"task name","difficulty":"easy","estMinutes":15,"day":"${todayKey}","reason":"why this difficulty"}]`, 45000);
   const parsed = JSON.parse(clean);
   if (!Array.isArray(parsed)) throw new Error("bad response");
   const validDays = new Set(["backlog", ...DAYS.map((d) => d.key)]);
+  const DAYS_ORDER = ["mon","tue","wed","thu","fri","sat","sun"];
+  const todayIndex = DAYS_ORDER.indexOf(todayKey);
   return parsed
     .filter((it) => it && it.title && DIFFICULTIES.some((d) => d.key === it.difficulty))
     .slice(0, 12)
-    .map((it) => ({
-      title: String(it.title).slice(0, 120),
-      difficulty: it.difficulty,
-      estMinutes: Math.min(240, Math.max(1, Math.round(Number(it.estMinutes) || 15))),
-      day: validDays.has(it.day) ? it.day : "backlog",
-    }));
+    .map((it) => {
+      let day = validDays.has(it.day) ? it.day : "backlog";
+      if (day !== "backlog" && DAYS_ORDER.indexOf(day) < todayIndex) day = "backlog";
+      return {
+        title: String(it.title).slice(0, 120),
+        difficulty: it.difficulty,
+        estMinutes: Math.min(240, Math.max(1, Math.round(Number(it.estMinutes) || 15))),
+        day,
+        reason: it.reason ? String(it.reason).slice(0, 60) : null,
+      };
+    });
 }
 
 async function splitEpicTask(taskTitle) {
@@ -425,7 +434,7 @@ export default function App() {
     setDumpParsing(true);
     parseBrainDump(trimmed, currentDayKey())
       .then((items) => {
-        setQuests((qs) => [...items.map((it) => ({ id: Date.now() + Math.random(), title: it.title, difficulty: it.difficulty, xp: xpFor(it.difficulty), reason: null, estMinutes: it.estMinutes, day: it.day, recurring: null, completed: false, completedAt: null })), ...qs]);
+        setQuests((qs) => [...items.map((it) => ({ id: Date.now() + Math.random(), title: it.title, difficulty: it.difficulty, xp: xpFor(it.difficulty), reason: it.reason || null, estMinutes: it.estMinutes, day: it.day, recurring: null, completed: false, completedAt: null })), ...qs]);
         setDumpText("");
         setDumpModalOpen(false);
       })
