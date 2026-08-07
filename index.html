@@ -8,7 +8,10 @@
   <title>QuestAI</title>
   <style>
     html, body { margin: 0; padding: 0; background: #1B2430; }
-    #root { min-height: 100vh; }
+    #root { min-height: 100vh; min-height: 100dvh; }
+    /* Safe area support for notch / Dynamic Island / home indicator */
+    .safe-top    { padding-top: env(safe-area-inset-top, 0px); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
   </style>
 </head>
 <body>
