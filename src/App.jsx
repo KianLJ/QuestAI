@@ -343,9 +343,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moveMenuFor, setMoveMenuFor] = useState(null);
   const [questDetailFor, setQuestDetailFor] = useState(null);
-  const [dragId, setDragId] = useState(null);
   const [dragOverDate, setDragOverDate] = useState(null);
   const [dragOverTrash, setDragOverTrash] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragIdRef = useRef(null);
   const saveTimer = useRef(null);
 
   // ---- Load ----
@@ -701,10 +702,20 @@ export default function App() {
     return (
       <div
         draggable
-        onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(q.id)); setDragId(q.id); }}
-        onDragEnd={() => { setDragId(null); setDragOverDate(null); setDragOverTrash(false); }}
+        onDragStart={(e) => {
+          e.dataTransfer.setData("text/plain", String(q.id));
+          dragIdRef.current = q.id;
+          // Defer state update so it doesn't interrupt the browser's drag initiation
+          setTimeout(() => setIsDragging(true), 0);
+        }}
+        onDragEnd={() => {
+          dragIdRef.current = null;
+          setIsDragging(false);
+          setDragOverDate(null);
+          setDragOverTrash(false);
+        }}
         onClick={() => setQuestDetailFor(q.id)}
-        style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 4, background: dragId === q.id ? accent + "33" : q.completed ? "#1F2836" : "#232E3D", cursor: "grab", opacity: dragId === q.id ? 0.5 : q.completed ? 0.5 : 1, borderLeft: `2px solid ${diff.color}`, marginBottom: 2, userSelect: "none" }}>
+        style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 4, background: q.completed ? "#1F2836" : "#232E3D", cursor: "grab", opacity: q.completed ? 0.5 : 1, borderLeft: `2px solid ${diff.color}`, marginBottom: 2, userSelect: "none" }}>
         <div style={{ width: 6, height: 6, borderRadius: "50%", background: diff.color, flexShrink: 0 }} />
         <span style={{ fontSize: 11, lineHeight: 1.2, color: q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{q.title}</span>
       </div>
@@ -1021,7 +1032,7 @@ export default function App() {
                   <div key={date}
                     onDragOver={(e) => { e.preventDefault(); setDragOverDate(date); }}
                     onDragLeave={() => setDragOverDate((d) => d === date ? null : d)}
-                    onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); setDragOverDate(null); setDragId(null); }}
+                    onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); }}
                     style={{ flex: 1, borderRight: "1px solid #2C3947", padding: "6px 4px", minHeight: 160, background: isOver ? accent + "18" : "transparent", transition: "background 0.1s ease" }}
                     onClick={(e) => { if (e.target === e.currentTarget) { setAddDate(date); setAddModalOpen(true); } }}>
                     {dayQuests.length === 0
@@ -1058,7 +1069,7 @@ export default function App() {
                     <div key={date}
                       onDragOver={(e) => { e.preventDefault(); setDragOverDate(date); }}
                       onDragLeave={() => setDragOverDate((d) => d === date ? null : d)}
-                      onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); setDragOverDate(null); setDragId(null); }}
+                      onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); }}
                       onClick={() => { setCalAnchor(date); setCalView("day"); }}
                       style={{ borderRight: i % 7 < 6 ? "1px solid #2C3947" : "none", borderBottom: "1px solid #2C3947", padding: "4px", minHeight: 64, cursor: "pointer", background: isOver ? accent + "28" : isToday ? accent + "18" : "transparent", opacity: isThisMonth ? 1 : 0.4, transition: "background 0.1s ease" }}>
                       <div style={{ width: 20, height: 20, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
@@ -1077,11 +1088,11 @@ export default function App() {
         {splitError && <p style={{ fontSize: 11, color: "#C1652B", textAlign: "center", marginTop: 8 }}>Couldn't split that task — try again in a moment.</p>}
 
         {/* Trash drop zone — appears while dragging */}
-        {dragId && (
+        {isDragging && (
           <div
             onDragOver={(e) => { e.preventDefault(); setDragOverTrash(true); }}
             onDragLeave={() => setDragOverTrash(false)}
-            onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); deleteQuest(id); setDragOverTrash(false); setDragId(null); }}
+            onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); deleteQuest(id); dragIdRef.current = null; setIsDragging(false); setDragOverTrash(false); }}
             style={{ margin: "10px 0", padding: "14px 0", borderRadius: 10, border: `2px dashed ${dragOverTrash ? "#B33A3A" : "#8A2E44"}`, background: dragOverTrash ? "rgba(179,58,58,0.15)" : "rgba(138,46,68,0.06)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all 0.15s ease", cursor: "copy" }}>
             <Trash2 size={18} color={dragOverTrash ? "#B33A3A" : "#8A2E44"} />
             <span style={{ fontSize: 13, fontWeight: 600, color: dragOverTrash ? "#B33A3A" : "#8A2E44" }}>Drop here to delete</span>
