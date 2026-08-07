@@ -140,13 +140,13 @@ function xpFor(diffKey) { return DIFFICULTIES.find((d) => d.key === diffKey)?.xp
 function emptyDayCounts() { return Object.fromEntries(DAYS.map((d) => [d.key, 0])); }
 function emptyDiffCounts() { return Object.fromEntries(DIFFICULTIES.map((d) => [d.key, 0])); }
 function extractJson(text) {
-  const trimmed = text.trim();
-  const first = trimmed.search(/[\[{]/);
-  if (first === -1) return trimmed;
-  const opener = trimmed[first];
-  const closer = opener === "[" ? "]" : "}";
-  const last = trimmed.lastIndexOf(closer);
-  return last === -1 || last < first ? trimmed : trimmed.slice(first, last + 1);
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  // Try to find a JSON array first, then object
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (arrayMatch) return arrayMatch[0];
+  const objMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (objMatch) return objMatch[0];
+  return cleaned;
 }
 
 // ---- Gemini AI (via Vercel serverless proxy — no key in browser) ----
@@ -179,40 +179,42 @@ async function callQuestAI(prompt, timeoutMs = 60000) {
 }
 
 async function assessTask(taskTitle) {
-  const clean = await callQuestAI(`You are an assistant that estimates how a personal to-do feels to start and finish, for someone with ADHD, based only on a short description.
+  const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a single JSON object. No prose, no explanation, no markdown, no backticks. Just the raw JSON object and nothing else. Any text outside the JSON will break the parser.
 
-Task: "${taskTitle}"
+Task to classify: "${taskTitle}"
 
-1. Classify effort into exactly one of: trivial, easy, medium, hard, epic
-   - trivial: near-zero effort, under 2 minutes
-   - easy: quick, low focus
-   - medium: moderate effort, roughly 20-45 minutes
-   - hard: significant focus or multiple steps
-   - epic: large, multi-step, or taxing
-2. Estimate realistic minutes to complete it (whole number, 1-240).
+Classify effort for someone with ADHD:
+- trivial: under 2 minutes, zero activation energy
+- easy: quick, low focus needed
+- medium: moderate effort, ~20-45 minutes
+- hard: significant focus or multiple steps
+- epic: large, multi-step, or emotionally taxing
 
-Respond with ONLY raw JSON in exactly this shape:
-{"difficulty":"easy","estMinutes":10,"reason":"under 6 words explaining why"}`);
+OUTPUT FORMAT (copy this exactly, fill in values):
+{"difficulty":"easy","estMinutes":10,"reason":"6 words max"}`);
   const parsed = JSON.parse(clean);
   if (!DIFFICULTIES.some((d) => d.key === parsed.difficulty)) throw new Error("bad difficulty");
   return { difficulty: parsed.difficulty, estMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.estMinutes) || 15))), reason: parsed.reason };
 }
 
 async function parseBrainDump(text, todayKey) {
-  const clean = await callQuestAI(`You help someone with ADHD turn a messy brain-dump into a clean weekly plan.
+  const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON array. No prose, no explanation, no markdown, no backticks, no commentary before or after. Just the raw JSON array starting with [ and ending with ]. Any text outside the array will break the parser.
 
-Today is ${todayKey}. Week runs mon, tue, wed, thu, fri, sat, sun.
+Today is ${todayKey}. Week: mon tue wed thu fri sat sun.
 
-Raw notes:
+Raw notes to convert into tasks:
 """${text}"""
 
-Split into distinct actionable tasks (max 12). For each:
-1. Classify: trivial/easy/medium/hard/epic
-2. Estimate minutes (1-240)
-3. Pick day: mon/tue/wed/thu/fri/sat/sun or "backlog". Spread tasks across the week, don't pile everything on one day.
+Rules:
+- Split into max 12 distinct actionable tasks
+- Skip vague filler
+- Classify each: trivial/easy/medium/hard/epic
+- Estimate minutes: 1-240
+- Pick a day (mon/tue/wed/thu/fri/sat/sun) or "backlog" — spread across the week
+- Do NOT add explanations
 
-Respond with ONLY a JSON array:
-[{"title":"...","difficulty":"easy","estMinutes":10,"day":"wed"}]`, 45000);
+OUTPUT FORMAT (a JSON array, nothing else):
+[{"title":"task name","difficulty":"easy","estMinutes":15,"day":"mon"}]`, 45000);
   const parsed = JSON.parse(clean);
   if (!Array.isArray(parsed)) throw new Error("bad response");
   const validDays = new Set(["backlog", ...DAYS.map((d) => d.key)]);
@@ -228,14 +230,19 @@ Respond with ONLY a JSON array:
 }
 
 async function splitEpicTask(taskTitle) {
-  const clean = await callQuestAI(`Break this task into 2-4 smaller concrete sub-tasks for someone with ADHD.
+  const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON array. No prose, no explanation, no markdown, no backticks. Just the raw JSON array starting with [ and ending with ]. Any text outside the array will break the parser.
 
-Task: "${taskTitle}"
+Break this task into 2-4 smaller sub-tasks for someone with ADHD:
+"${taskTitle}"
 
-For each: short title, effort tier (trivial/easy/medium/hard — never epic), estimated minutes (1-120).
+Rules:
+- Each sub-task must be concrete and startable
+- Effort tier: trivial/easy/medium/hard (never epic)
+- Estimated minutes: 1-120
+- No explanations outside the JSON
 
-Respond with ONLY a JSON array:
-[{"title":"...","difficulty":"easy","estMinutes":10}]`);
+OUTPUT FORMAT (a JSON array, nothing else):
+[{"title":"sub-task name","difficulty":"easy","estMinutes":15}]`);
   const parsed = JSON.parse(clean);
   if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("bad response");
   return parsed
