@@ -202,6 +202,7 @@ async function callQuestAI(prompt, timeoutMs = 60000, maxTokens = 4096) {
     clearTimeout(timer);
   }
   if (response.status === 500) throw new Error("Gemini API key not configured on server — check Vercel environment variables.");
+  if (response.status === 429) { const err = new Error("AI quota reached for today"); err.isQuota = true; throw err; }
   if (!response.ok) throw new Error(`AI error ${response.status}`);
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -325,6 +326,8 @@ export default function App() {
   const [xpPop, setXpPop] = useState(null);
   const [assessing, setAssessing] = useState(false);
   const [assessError, setAssessError] = useState(false);
+  const [aiQuotaExhausted, setAiQuotaExhausted] = useState(false);
+  const [difficulty, setDifficulty] = useState("medium");
   const [focus, setFocus] = useState(null);
   const [focusOpen, setFocusOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -559,7 +562,27 @@ export default function App() {
       else setAddModalOpen(false);
     };
     setAssessing(true);
-    assessTask(trimmed).then((r) => finish(r.difficulty, r.reason, r.estMinutes)).catch(() => { setAssessError(true); finish("medium", null, null, 1600); }).finally(() => setAssessing(false));
+    assessTask(trimmed)
+      .then((r) => finish(r.difficulty, r.reason, r.estMinutes))
+      .catch((e) => {
+        if (e.isQuota) {
+          setAiQuotaExhausted(true);
+          setAssessError(false);
+        } else {
+          setAssessError(true);
+        }
+        // Don't silently add — let the user pick difficulty manually
+      })
+      .finally(() => setAssessing(false));
+  }
+
+  function addQuestManual() {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    setQuests((q) => [{ id: Date.now() + Math.random(), title: trimmed, difficulty, xp: xpFor(difficulty), reason: null, estMinutes: null, date: addDate, recurring: recurringChoice, completed: false, completedAt: null }, ...q]);
+    setTitle("");
+    setAssessError(false);
+    setAddModalOpen(false);
   }
 
   function submitDump() {
@@ -1227,10 +1250,30 @@ export default function App() {
         {addModalOpen && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 380, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
-              <button onClick={() => setAddModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+              <button onClick={() => { setAddModalOpen(false); setAssessError(false); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
               <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>New Quest</h3>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && addQuest()} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, opacity: assessing ? 0.6 : 1 }} />
-              {assessError && <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 12px" }}>Assessment failed — quest added with default difficulty</p>}
+              <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && (aiQuotaExhausted || assessError ? addQuestManual() : addQuest())} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, opacity: assessing ? 0.6 : 1 }} />
+
+              {/* Quota / error state — show manual difficulty picker */}
+              {aiQuotaExhausted && (
+                <div style={{ background: "rgba(193,101,43,0.1)", border: "1px solid #C1652B", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+                  <p style={{ fontSize: 12, color: "#C1652B", fontWeight: 600, margin: "0 0 4px" }}>⚠ AI quota reached for today</p>
+                  <p style={{ fontSize: 11, color: "#8A8578", margin: 0 }}>Resets tomorrow. Pick difficulty manually below.</p>
+                </div>
+              )}
+              {assessError && !aiQuotaExhausted && (
+                <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 10px" }}>Assessment failed — pick difficulty manually below or try again.</p>
+              )}
+              {(aiQuotaExhausted || assessError) && (
+                <div style={{ marginBottom: 12 }}>
+                  <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Difficulty:</p>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {DIFFICULTIES.map((d) => (
+                      <button key={d.key} onClick={() => setDifficulty(d.key)} className="qlog-btn" style={{ cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "5px 9px", borderRadius: 20, border: `1.5px solid ${d.color}`, background: difficulty === d.key ? d.color : "transparent", color: difficulty === d.key ? "#1B2430" : d.color }}>{d.label} · {d.xp}xp</button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Date:</p>
               <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
               <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Repeat:</p>
@@ -1241,9 +1284,10 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              <button onClick={addQuest} className="qlog-btn" disabled={assessing || !title.trim()} style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: assessing || !title.trim() ? "default" : "pointer", opacity: assessing || !title.trim() ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}>
-                {assessing ? <Loader2 size={18} className="spin" /> : <Plus size={18} />} {assessing ? "Assessing..." : "Add Quest"}
+              <button onClick={aiQuotaExhausted || assessError ? addQuestManual : addQuest} className="qlog-btn" disabled={assessing || !title.trim()} style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: assessing || !title.trim() ? "default" : "pointer", opacity: assessing || !title.trim() ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}>
+                {assessing ? <Loader2 size={18} className="spin" /> : <Plus size={18} />} {assessing ? "Assessing..." : aiQuotaExhausted || assessError ? "Add Quest" : "Add Quest (AI)"}
               </button>
+              {!aiQuotaExhausted && !assessError && <p style={{ fontSize: 10, color: "#5C6773", margin: "8px 0 0", textAlign: "center" }}>QuestAI will assess difficulty + time automatically</p>}
             </div>
           </div>
         )}
