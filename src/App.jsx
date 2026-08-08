@@ -111,7 +111,6 @@ const THEMES = [
 const STORAGE_KEY = "quest-log-data";
 const XP_BASE = 100;
 const XP_INCREMENT = 15;
-const WEEKLY_BONUS_XP = 50;
 
 function habitTier(streakDays) {
   if (streakDays >= 66) return { label: "Diamond", color: "#4FA3C9" };
@@ -305,9 +304,6 @@ export default function App() {
   const [gold, setGold] = useState(0);
   const [streak, setStreak] = useState(0);
   const [lastActiveDate, setLastActiveDate] = useState(null);
-  const [weeklyGoal, setWeeklyGoal] = useState(10);
-  const [weeklyCompletedCount, setWeeklyCompletedCount] = useState(0);
-  const [weeklyBonusClaimed, setWeeklyBonusClaimed] = useState(false);
   const [weeklyBossId, setWeeklyBossId] = useState(null);
   const [weekStart, setWeekStart] = useState(getMondayISO());
   const [unlockedThemes, setUnlockedThemes] = useState(["ember"]);
@@ -330,11 +326,9 @@ export default function App() {
   // UI state
   const [showCompleted, setShowCompleted] = useState(true);
   const [levelUp, setLevelUp] = useState(null);
-  const [weekBonusBanner, setWeekBonusBanner] = useState(false);
   const [streakBanner, setStreakBanner] = useState(null);
   const [bossBanner, setBossBanner] = useState(null);
   const [xpPop, setXpPop] = useState(null);
-  const [autoAssess, setAutoAssess] = useState(true);
   const [assessing, setAssessing] = useState(false);
   const [assessError, setAssessError] = useState(false);
   const [focus, setFocus] = useState(null);
@@ -406,10 +400,7 @@ export default function App() {
         setGold(data.gold || 0);
         setStreak(data.streak || 0);
         setLastActiveDate(data.lastActiveDate || null);
-        setWeeklyGoal(data.weeklyGoal ?? 10);
         setWeekStart(data.weekStart === nowMonday ? data.weekStart : nowMonday);
-        setWeeklyCompletedCount(data.weekStart === nowMonday ? (data.weeklyCompletedCount || 0) : 0);
-        setWeeklyBonusClaimed(data.weekStart === nowMonday ? !!data.weeklyBonusClaimed : false);
         setWeeklyBossId(data.weekStart === nowMonday ? (data.weeklyBossId || null) : null);
         setUnlockedThemes(data.unlockedThemes?.length ? data.unlockedThemes : ["ember"]);
         setSelectedTheme(data.selectedTheme || "ember");
@@ -434,13 +425,12 @@ export default function App() {
     saveTimer.current = setTimeout(async () => {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
-          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyGoal, weeklyCompletedCount,
-          weeklyBonusClaimed, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff,
+          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff,
           habits, habitPerfectDayDate, calView,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyGoal, weeklyCompletedCount, weeklyBonusClaimed, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -466,9 +456,6 @@ export default function App() {
         setGold(data.gold || 0);
         setStreak(data.streak || 0);
         setLastActiveDate(data.lastActiveDate || null);
-        setWeeklyGoal(data.weeklyGoal ?? 10);
-        setWeeklyCompletedCount(data.weeklyCompletedCount || 0);
-        setWeeklyBonusClaimed(!!data.weeklyBonusClaimed);
         setWeeklyBossId(data.weeklyBossId || null);
         setWeekStart(data.weekStart || nowMonday);
         setUnlockedThemes(data.unlockedThemes?.length ? data.unlockedThemes : ["ember"]);
@@ -497,7 +484,6 @@ export default function App() {
   const nextMilestone = MILESTONE_LEVELS.find((m) => level < m);
   const accent = THEMES.find((t) => t.key === selectedTheme)?.color || "#C9A227";
   const today = todayStr();
-  const weeklyPct = weeklyGoal > 0 ? Math.min(100, (weeklyCompletedCount / weeklyGoal) * 100) : 0;
   const timerPct = focus && focus.totalSeconds ? (focus.secondsLeft / focus.totalSeconds) * 100 : 100;
   const timerColor = timerPct > 50 ? "#4C9A6A" : timerPct > 20 ? "#C9A227" : "#8A2E44";
   const bossQuest = weeklyBossId ? quests.find((q) => q.id === weeklyBossId) : null;
@@ -578,12 +564,8 @@ export default function App() {
       if (closeDelay > 0) setTimeout(() => setAddModalOpen(false), closeDelay);
       else setAddModalOpen(false);
     };
-    if (autoAssess) {
-      setAssessing(true);
-      assessTask(trimmed).then((r) => finish(r.difficulty, r.reason, r.estMinutes)).catch(() => { setAssessError(true); finish(difficulty, null, null, 1600); }).finally(() => setAssessing(false));
-    } else {
-      finish(difficulty, null, null);
-    }
+    setAssessing(true);
+    assessTask(trimmed).then((r) => finish(r.difficulty, r.reason, r.estMinutes)).catch(() => { setAssessError(true); finish("medium", null, null, 1600); }).finally(() => setAssessing(false));
   }
 
   function submitDump() {
@@ -617,8 +599,6 @@ export default function App() {
     const { beatClockBonus = 0 } = opts;
     const quest = quests.find((q) => q.id === id);
     if (!quest || quest.completed) return;
-    const newWeeklyCount = weeklyCompletedCount + 1;
-    const weeklyBonusEarned = !weeklyBonusClaimed && weeklyGoal > 0 && newWeeklyCount >= weeklyGoal;
     const isBoss = weeklyBossId === id;
     const bossBonus = isBoss ? quest.xp : 0;
     let newStreak = streak, milestoneBonus = 0, streakChanged = false;
@@ -632,23 +612,20 @@ export default function App() {
     const boostPct = comboBonusPct(comboOrdinal) + streakBonusPct(effectiveStreak);
     const workXP = quest.xp + beatClockBonus + bossBonus;
     const boostXP = Math.round(workXP * boostPct);
-    const xpGain = workXP + boostXP + (weeklyBonusEarned ? WEEKLY_BONUS_XP : 0) + milestoneBonus;
+    const xpGain = workXP + boostXP + milestoneBonus;
     const goldEarned = Math.max(1, Math.round(xpGain / 10));
     const prevLevel = levelFromXP(totalXP).level;
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
-    const undo = { xpAwarded: xpGain, goldAwarded: goldEarned, weeklyBonusAwarded: weeklyBonusEarned, streakIncremented: streakChanged, prevStreak: streak, prevLastActiveDate: lastActiveDate };
+    const undo = { xpAwarded: xpGain, goldAwarded: goldEarned, streakIncremented: streakChanged, prevStreak: streak, prevLastActiveDate: lastActiveDate };
     setQuests((qs) => qs.map((q) => q.id === id ? { ...q, completed: true, completedAt: today, undo } : q));
     setTotalXP(newTotal);
     setGold((g) => g + goldEarned);
-    setWeeklyCompletedCount(newWeeklyCount);
-    if (weeklyBonusEarned) setWeeklyBonusClaimed(true);
     if (streakChanged) { setStreak(newStreak); setLastActiveDate(today); }
     setXpPop({ id, xp: workXP + boostXP });
     setTimeout(() => setXpPop(null), 900);
     if (isBoss) { setBossBanner(true); setTimeout(() => setBossBanner(false), 2400); }
     if (milestoneBonus > 0) { setStreakBanner({ days: newStreak, bonus: milestoneBonus }); setTimeout(() => setStreakBanner(null), 2400); }
-    if (weeklyBonusEarned) { setWeekBonusBanner(true); setTimeout(() => setWeekBonusBanner(false), 2400); }
     if (newLevel > prevLevel) { setLevelUp({ level: newLevel, rank: rankForLevel(newLevel) }); setTimeout(() => setLevelUp(null), 2400); }
     setFocus((f) => f && f.questId === id ? null : f);
     setFocusOpen(false);
@@ -658,11 +635,10 @@ export default function App() {
   function uncompleteQuest(id) {
     const quest = quests.find((q) => q.id === id);
     if (!quest || !quest.completed) return;
-    const undo = quest.undo || { xpAwarded: quest.xp, goldAwarded: 1, weeklyBonusAwarded: false, streakIncremented: false, prevStreak: streak, prevLastActiveDate: lastActiveDate };
+    const undo = quest.undo || { xpAwarded: quest.xp, goldAwarded: 1, streakIncremented: false, prevStreak: streak, prevLastActiveDate: lastActiveDate };
     setTotalXP((t) => Math.max(0, t - undo.xpAwarded));
     setGold((g) => Math.max(0, g - (undo.goldAwarded || 0)));
     setWeeklyCompletedCount((c) => Math.max(0, c - 1));
-    if (undo.weeklyBonusAwarded) setWeeklyBonusClaimed(false);
     if (undo.streakIncremented) { setStreak(undo.prevStreak); setLastActiveDate(undo.prevLastActiveDate); }
     setQuests((qs) => qs.map((q) => q.id === id ? { ...q, completed: false, completedAt: null, undo: null } : q));
   }
@@ -774,25 +750,77 @@ export default function App() {
   // ---- Quest card (compact for calendar cells) ----
   function QuestDot({ q }) {
     const diff = DIFFICULTIES.find((d) => d.key === q.difficulty);
+    const isOverdue = !q.completed && q.date < today;
+    const swipeRef = useRef(null);
+    const startXRef = useRef(null);
+    const [swipeOffset, setSwipeOffset] = useState(0);
+    const [swipeAction, setSwipeAction] = useState(null); // "complete" | "delete" | null
+
+    function onTouchStart(e) {
+      startXRef.current = e.touches[0].clientX;
+      setSwipeOffset(0);
+      setSwipeAction(null);
+    }
+    function onTouchMove(e) {
+      if (startXRef.current === null) return;
+      const dx = e.touches[0].clientX - startXRef.current;
+      const clamped = Math.max(-80, Math.min(80, dx));
+      setSwipeOffset(clamped);
+      if (clamped > 36) setSwipeAction("complete");
+      else if (clamped < -36) setSwipeAction("delete");
+      else setSwipeAction(null);
+    }
+    function onTouchEnd() {
+      if (swipeAction === "complete" && !q.completed) completeQuest(q.id);
+      else if (swipeAction === "delete") deleteQuest(q.id);
+      setSwipeOffset(0);
+      setSwipeAction(null);
+      startXRef.current = null;
+    }
+
+    const swipeBg = swipeAction === "complete" ? "#4C9A6A"
+                  : swipeAction === "delete" ? "#8A2E44"
+                  : "transparent";
+
     return (
-      <div
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData("text/plain", String(q.id));
-          dragIdRef.current = q.id;
-          // Defer state update so it doesn't interrupt the browser's drag initiation
-          setTimeout(() => setIsDragging(true), 0);
-        }}
-        onDragEnd={() => {
-          dragIdRef.current = null;
-          setIsDragging(false);
-          setDragOverDate(null);
-          setDragOverTrash(false);
-        }}
-        onClick={() => setQuestDetailFor(q.id)}
-        style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 4, background: q.completed ? "#1F2836" : "#232E3D", cursor: "grab", opacity: q.completed ? 0.5 : 1, borderLeft: `2px solid ${diff.color}`, marginBottom: 2, userSelect: "none" }}>
-        <div style={{ width: 6, height: 6, borderRadius: "50%", background: diff.color, flexShrink: 0 }} />
-        <span style={{ fontSize: 11, lineHeight: 1.2, color: q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120 }}>{q.title}</span>
+      <div ref={swipeRef} style={{ position: "relative", marginBottom: 2, borderRadius: 4, overflow: "hidden" }}>
+        {/* Swipe hint background */}
+        {swipeOffset !== 0 && (
+          <div style={{ position: "absolute", inset: 0, background: swipeBg, display: "flex", alignItems: "center", justifyContent: swipeOffset > 0 ? "flex-start" : "flex-end", padding: "0 10px", fontSize: 12, color: "#EDE4D3", fontWeight: 700, transition: "background 0.1s ease" }}>
+            {swipeOffset > 0 ? "✓ Complete" : "✕ Delete"}
+          </div>
+        )}
+        <div
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData("text/plain", String(q.id));
+            dragIdRef.current = q.id;
+            setTimeout(() => setIsDragging(true), 0);
+          }}
+          onDragEnd={() => { dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); setDragOverTrash(false); }}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          style={{
+            display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 4,
+            background: q.completed ? "#1F2836" : isOverdue ? "rgba(138,46,68,0.15)" : "#232E3D",
+            borderLeft: `2px solid ${isOverdue && !q.completed ? "#8A2E44" : diff.color}`,
+            opacity: q.completed ? 0.5 : 1, cursor: "grab", userSelect: "none",
+            transform: `translateX(${swipeOffset}px)`,
+            transition: swipeOffset === 0 ? "transform 0.2s ease" : "none",
+          }}>
+          {/* Quick-complete dot — tap to complete without opening detail */}
+          <div
+            onClick={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
+            style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer" }}
+            title={q.completed ? "Undo" : "Complete"}
+          />
+          <span
+            onClick={() => setQuestDetailFor(q.id)}
+            style={{ fontSize: 11, lineHeight: 1.2, color: isOverdue && !q.completed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120, flex: 1, cursor: "pointer" }}>
+            {isOverdue && !q.completed ? "⚠ " : ""}{q.title}
+          </span>
+        </div>
       </div>
     );
   }
@@ -924,11 +952,10 @@ export default function App() {
 
       {/* Banners */}
       {levelUp && <div className="level-banner" style={{ position: "fixed", top: 24, left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${accent}, #8A2E44)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Trophy size={22} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 15 }}>Level {levelUp.level} — {levelUp.rank}</span></div>}
-      {weekBonusBanner && <div className="level-banner" style={{ position: "fixed", top: levelUp ? 84 : 24, left: "50%", zIndex: 60, background: "linear-gradient(135deg, #4C9A6A, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Target size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>Weekly goal hit! +{WEEKLY_BONUS_XP} XP</span></div>}
-      {streakBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (weekBonusBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C1652B, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{streakBanner.days}-day streak! +{streakBanner.bonus} XP</span></div>}
-      {bossBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (weekBonusBanner ? 60 : 0) + (streakBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #8A5FBF, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Crown size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>Boss defeated! Bonus XP earned.</span></div>}
-      {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (weekBonusBanner ? 60 : 0) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 14 }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
-      {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (weekBonusBanner ? 60 : 0) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
+      {streakBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C1652B, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{streakBanner.days}-day streak! +{streakBanner.bonus} XP</span></div>}
+      {bossBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #8A5FBF, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Crown size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>Boss defeated! Bonus XP earned.</span></div>}
+      {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 14 }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
+      {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
 
       {/* Floating timer */}
       {focus && focus.started && !focusOpen && (
@@ -1130,6 +1157,7 @@ export default function App() {
                   const dayQuests = quests.filter((q) => q.date === date && (showCompleted || !q.completed));
                   const active = dayQuests.filter((q) => !q.completed).length;
                   const done = dayQuests.filter((q) => q.completed).length;
+                  const hasOverdue = date < today && active > 0;
                   const isOver = dragOverDate === date;
                   return (
                     <div key={date}
@@ -1137,11 +1165,11 @@ export default function App() {
                       onDragLeave={() => setDragOverDate((d) => d === date ? null : d)}
                       onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); }}
                       onClick={() => { setCalAnchor(date); setCalView("day"); }}
-                      style={{ borderRight: i % 7 < 6 ? "1px solid #2C3947" : "none", borderBottom: "1px solid #2C3947", padding: "4px", minHeight: 64, cursor: "pointer", background: isOver ? accent + "28" : isToday ? accent + "18" : "transparent", opacity: isThisMonth ? 1 : 0.4, transition: "background 0.1s ease" }}>
+                      style={{ borderRight: i % 7 < 6 ? "1px solid #2C3947" : "none", borderBottom: "1px solid #2C3947", padding: "4px", minHeight: 64, cursor: "pointer", background: isOver ? accent + "28" : hasOverdue ? "rgba(138,46,68,0.12)" : isToday ? accent + "18" : "transparent", opacity: isThisMonth ? 1 : 0.4, transition: "background 0.1s ease" }}>
                       <div style={{ width: 20, height: 20, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
                       </div>
-                      {active > 0 && <div style={{ fontSize: 9, fontWeight: 700, color: accent, lineHeight: 1.4 }}>{active} quest{active !== 1 ? "s" : ""}</div>}
+                      {active > 0 && <div style={{ fontSize: 9, fontWeight: 700, color: hasOverdue ? "#C1652B" : accent, lineHeight: 1.4 }}>{hasOverdue ? "⚠ " : ""}{active} quest{active !== 1 ? "s" : ""}</div>}
                       {done > 0 && <div style={{ fontSize: 9, color: "#4C9A6A", lineHeight: 1.4 }}>✓ {done}</div>}
                     </div>
                   );
@@ -1207,12 +1235,6 @@ export default function App() {
               <button onClick={() => setAddModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
               <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>New Quest</h3>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && addQuest()} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, opacity: assessing ? 0.6 : 1 }} />
-              <button onClick={() => setAutoAssess((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: 12, color: autoAssess ? accent : "#5C6773" }}>
-                <span style={{ width: 28, height: 16, borderRadius: 20, background: autoAssess ? accent : "#3A4552", position: "relative", transition: "background 0.15s ease", flexShrink: 0 }}>
-                  <span style={{ position: "absolute", top: 2, left: autoAssess ? 13 : 2, width: 12, height: 12, borderRadius: "50%", background: "#141C27", transition: "left 0.15s ease" }} />
-                </span>
-                <Wand2 size={13} /><span style={{ fontSize: 12, fontWeight: 600 }}>Let QuestAI assess difficulty + time</span>
-              </button>
               {assessError && <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 12px" }}>Assessment failed — quest added with default difficulty</p>}
               <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Date:</p>
               <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
