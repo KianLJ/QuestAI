@@ -19,7 +19,7 @@ const ref = () => doc(db, "storage", DEVICE_ID);
 // Tracks the timestamp of the last write this tab made, so we can ignore the
 // Firestore echo of our own saves and not re-apply state we just set.
 let lastLocalWriteAt = 0;
-const OWN_WRITE_GRACE_MS = 3000;
+const OWN_WRITE_GRACE_MS = 1000;
 
 export const storage = {
   get: async (key) => {
