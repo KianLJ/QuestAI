@@ -2,7 +2,6 @@ export const maxDuration = 60;
 
 const MODELS = [
   "gemini-3.5-flash",
-  "gemini-2.5-flash",
   "gemini-2.5-flash-preview-05-20",
 ];
 
