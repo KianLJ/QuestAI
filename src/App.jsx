@@ -327,7 +327,6 @@ export default function App() {
   const [assessing, setAssessing] = useState(false);
   const [assessError, setAssessError] = useState(false);
   const [aiQuotaExhausted, setAiQuotaExhausted] = useState(false);
-  const [difficulty, setDifficulty] = useState("medium");
   const [focus, setFocus] = useState(null);
   const [focusOpen, setFocusOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
