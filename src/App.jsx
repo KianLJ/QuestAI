@@ -215,7 +215,7 @@ async function assessTask(taskTitle) {
 Task: "${taskTitle}"
 Tiers: trivial=under 2min, easy=quick low focus, medium=20-45min, hard=multi-step, epic=large/taxing
 {"difficulty":"easy","estMinutes":10,"reason":"6 words max"}`,
-    20000, 80
+    30000, 4096
   );
   const parsed = JSON.parse(clean);
   if (!DIFFICULTIES.some((d) => d.key === parsed.difficulty)) throw new Error("bad difficulty");
