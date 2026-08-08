@@ -181,7 +181,7 @@ function extractJson(text) {
 }
 
 // ---- Gemini AI (via Vercel serverless proxy — no key in browser) ----
-async function callQuestAI(prompt, timeoutMs = 60000) {
+async function callQuestAI(prompt, timeoutMs = 60000, maxTokens = 4096) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
@@ -191,7 +191,7 @@ async function callQuestAI(prompt, timeoutMs = 60000) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 4096 },
+        generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
       }),
       signal: controller.signal,
     });
@@ -210,19 +210,13 @@ async function callQuestAI(prompt, timeoutMs = 60000) {
 }
 
 async function assessTask(taskTitle) {
-  const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a single JSON object. No prose, no explanation, no markdown, no backticks. Just the raw JSON object and nothing else. Any text outside the JSON will break the parser.
-
-Task to classify: "${taskTitle}"
-
-Classify effort for someone with ADHD:
-- trivial: under 2 minutes, zero activation energy
-- easy: quick, low focus needed
-- medium: moderate effort, ~20-45 minutes
-- hard: significant focus or multiple steps
-- epic: large, multi-step, or emotionally taxing
-
-OUTPUT FORMAT (copy this exactly, fill in values):
-{"difficulty":"easy","estMinutes":10,"reason":"6 words max"}`);
+  const clean = await callQuestAI(
+    `Classify this task for someone with ADHD. Output ONLY a JSON object, nothing else.
+Task: "${taskTitle}"
+Tiers: trivial=under 2min, easy=quick low focus, medium=20-45min, hard=multi-step, epic=large/taxing
+{"difficulty":"easy","estMinutes":10,"reason":"6 words max"}`,
+    20000, 80
+  );
   const parsed = JSON.parse(clean);
   if (!DIFFICULTIES.some((d) => d.key === parsed.difficulty)) throw new Error("bad difficulty");
   return { difficulty: parsed.difficulty, estMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.estMinutes) || 15))), reason: parsed.reason };
@@ -288,7 +282,7 @@ Rules:
 - No explanations outside the JSON
 
 OUTPUT FORMAT (a JSON array, nothing else):
-[{"title":"sub-task name","difficulty":"easy","estMinutes":15}]`);
+[{"title":"sub-task name","difficulty":"easy","estMinutes":15}]`, 30000, 300);
   const parsed = JSON.parse(clean);
   if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("bad response");
   return parsed
@@ -811,8 +805,9 @@ export default function App() {
           }}>
           {/* Quick-complete dot — tap to complete without opening detail */}
           <div
-            onClick={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
-            style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer" }}
+            onClick={(e) => { e.stopPropagation(); e.preventDefault(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
+            onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); }}
+            style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer", padding: 4, margin: -4 }}
             title={q.completed ? "Undo" : "Complete"}
           />
           <span
