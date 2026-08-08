@@ -1,9 +1,7 @@
 export const maxDuration = 60;
 
 const MODELS = [
-  "gemini-3.5-flash",
-  "gemini-2.5-flash",
-  "gemini-2.5-flash-preview-05-20",
+  "gemini-3.5-flash-lite"
 ];
 
 export default async function handler(req, res) {
