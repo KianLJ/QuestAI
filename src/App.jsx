@@ -55,7 +55,19 @@ function Trophy({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" style={style}><path d="M7 4h10v4a5 5 0 0 1-10 0V4z" /><path d="M7 5H4a3 3 0 0 0 3 5" /><path d="M17 5h3a3 3 0 0 1-3 5" /><path d="M12 13v3" /><path d="M9 20h6" /><path d="M10 17h4l.5 3h-5z" /></svg>;
 }
 function Sword({ size = 16, color = "currentColor", style }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}><line x1="14.5" y1="3.5" x2="4" y2="14" /><path d="M4 14l2.5 2.5" /><line x1="17" y1="7" x2="14" y2="4" /><line x1="18.5" y1="5.5" x2="20.5" y2="7.5" /></svg>;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}>
+      {/* Blade — diagonal from top-right to middle */}
+      <line x1="20" y1="4" x2="9" y2="15" />
+      {/* Tip sharpening lines */}
+      <polyline points="20,4 16,4 20,8" />
+      {/* Guard / crosspiece */}
+      <line x1="7" y1="13" x2="11" y2="17" />
+      {/* Handle */}
+      <line x1="5" y1="17" x2="4" y2="20" />
+      <line x1="7" y1="19" x2="4" y2="20" />
+    </svg>
+  );
 }
 function Trash2({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}><path d="M4 7h16" /><path d="M9 7V4h6v3" /><path d="M6 7l1 13h10l1-13" /><line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" /></svg>;
@@ -341,6 +353,7 @@ export default function App() {
   const [splittingId, setSplittingId] = useState(null);
   const [splitError, setSplitError] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [moveMenuFor, setMoveMenuFor] = useState(null);
   const [questDetailFor, setQuestDetailFor] = useState(null);
   const [dragOverDate, setDragOverDate] = useState(null);
@@ -426,7 +439,7 @@ export default function App() {
           habits, habitPerfectDayDate, calView,
         }));
       } catch (e) { console.error("save failed", e); }
-    }, 800);
+    }, 150);
   }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyGoal, weeklyCompletedCount, weeklyBonusClaimed, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
 
   // ---- Real-time sync from other devices ----
@@ -728,7 +741,29 @@ export default function App() {
   }
   function deleteHabit(id) { setHabits((hs) => hs.filter((h) => h.id !== id)); }
 
-  function unlockOrEquipTheme(theme) {
+  async function clearAllData() {
+    try { await window.storage.delete(STORAGE_KEY); } catch (e) {}
+    setQuests([]);
+    setTotalXP(0);
+    setGold(0);
+    setStreak(0);
+    setLastActiveDate(null);
+    setWeeklyCompletedCount(0);
+    setWeeklyBonusClaimed(false);
+    setWeeklyBossId(null);
+    setHistoryDay(emptyDayCounts());
+    setHistoryDiff(emptyDiffCounts());
+    setHabits([
+      { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
+      { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
+      { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
+    ]);
+    setHabitPerfectDayDate(null);
+    setConfirmClear(false);
+    setSettingsOpen(false);
+  }
+
+    function unlockOrEquipTheme(theme) {
     if (unlockedThemes.includes(theme.key)) { setSelectedTheme(theme.key); return; }
     if (gold < theme.cost) return;
     setGold((g) => g - theme.cost);
@@ -940,21 +975,15 @@ export default function App() {
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 12px 0" }}>
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Sword size={22} color={accent} />
-            <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>Quest Log</h1>
+            <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>QuestAI</h1>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-            <button onClick={() => setThemeModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
-            <button onClick={() => setStatsOpen(true)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#8A8578", cursor: "pointer" }}><BarChart2 size={15} /></button>
-            <button onClick={() => setDumpModalOpen(true)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#8A8578", cursor: "pointer" }}><FileText size={15} /></button>
-            <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#8A8578", cursor: "pointer" }}><Gear size={15} /></button>
-            <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 5, background: accent, border: "none", borderRadius: 8, padding: "8px 12px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}><Plus size={14} /> Add Quest</button>
-          </div>
+          <button onClick={() => setThemeModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
         </div>
 
-        {/* XP / Streak panel */}
+        {/* XP / Streak + Action buttons */}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ flex: "1 1 200px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
@@ -979,20 +1008,17 @@ export default function App() {
               ))}
             </div>
           </div>
-          <div style={{ flex: "1 1 200px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}><Target size={13} color="#4C9A6A" /><span style={{ fontSize: 12, fontWeight: 600 }}>Weekly goal</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 }}>
-                <span>{weeklyCompletedCount}/</span>
-                <input type="number" min={1} value={weeklyGoal} onChange={(e) => setWeeklyGoal(Math.max(1, Number(e.target.value) || 1))} style={{ width: 36, background: "#141C27", border: "1px solid #33414F", borderRadius: 5, color: "#EDE4D3", padding: "1px 3px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 }} />
-              </div>
+
+          {/* Action buttons panel */}
+          <div style={{ flex: "1 1 200px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}><Plus size={15} /> Add Quest</button>
+            <button onClick={() => setDumpModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: "pointer" }}><FileText size={14} /> Brain Dump</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setStatsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><BarChart2 size={14} /> Stats</button>
+              <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /> Settings</button>
             </div>
-            <div style={{ height: 7, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 6 }}>
-              <div style={{ height: "100%", width: `${weeklyPct}%`, background: weeklyBonusClaimed ? "#4C9A6A" : `linear-gradient(90deg, #4C9A6A, #2E6B4A)`, borderRadius: 4, transition: "width 0.4s ease" }} />
-            </div>
-            <p style={{ fontSize: 10, color: "#5C6773", margin: 0 }}>{weeklyBonusClaimed ? "Bonus claimed — nice work." : `+${WEEKLY_BONUS_XP} XP bonus on completion.`}</p>
             {bossQuest && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, padding: "6px 8px", background: "rgba(138,95,191,0.1)", borderRadius: 6, border: "1px solid #8A5FBF" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", background: "rgba(138,95,191,0.1)", borderRadius: 6, border: "1px solid #8A5FBF" }}>
                 <Crown size={12} color="#8A5FBF" />
                 <span style={{ fontSize: 11, color: "#8A5FBF", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}</span>
                 <button onClick={() => setWeeklyBossId(null)} style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 0 }}><X size={12} /></button>
@@ -1181,16 +1207,13 @@ export default function App() {
               <button onClick={() => setAddModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
               <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>New Quest</h3>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && addQuest()} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, opacity: assessing ? 0.6 : 1 }} />
-              <button onClick={() => setAutoAssess((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: 10, color: autoAssess ? accent : "#5C6773" }}>
+              <button onClick={() => setAutoAssess((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: 12, color: autoAssess ? accent : "#5C6773" }}>
                 <span style={{ width: 28, height: 16, borderRadius: 20, background: autoAssess ? accent : "#3A4552", position: "relative", transition: "background 0.15s ease", flexShrink: 0 }}>
                   <span style={{ position: "absolute", top: 2, left: autoAssess ? 13 : 2, width: 12, height: 12, borderRadius: "50%", background: "#141C27", transition: "left 0.15s ease" }} />
                 </span>
                 <Wand2 size={13} /><span style={{ fontSize: 12, fontWeight: 600 }}>Let QuestAI assess difficulty + time</span>
               </button>
-              {assessError && <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 8px" }}>Assessment failed — used manual pick</p>}
-              <div style={{ display: "flex", gap: 5, flexWrap: "wrap", opacity: autoAssess ? 0.5 : 1, marginBottom: 12 }}>
-                {DIFFICULTIES.map((d) => <button key={d.key} onClick={() => setDifficulty(d.key)} className="qlog-btn" style={{ cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "5px 8px", borderRadius: 20, border: `1.5px solid ${d.color}`, background: difficulty === d.key ? d.color : "transparent", color: difficulty === d.key ? "#1B2430" : d.color }}>{d.label} · {d.xp}xp</button>)}
-              </div>
+              {assessError && <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 12px" }}>Assessment failed — quest added with default difficulty</p>}
               <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Date:</p>
               <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
               <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Repeat:</p>
@@ -1255,11 +1278,57 @@ export default function App() {
 
         {settingsOpen && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-            <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 380, position: "relative" }}>
-              <button onClick={() => setSettingsOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 6px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Settings</h3>
-              <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 16px" }}>AI features are powered by Gemini, running securely on the server. No setup needed here.</p>
-              <button onClick={() => setSettingsOpen(false)} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Got it</button>
+            <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 400, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
+              <button onClick={() => { setSettingsOpen(false); setConfirmClear(false); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+              <h3 style={{ margin: "0 0 20px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Settings</h3>
+
+              {/* Default calendar view */}
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>DEFAULT CALENDAR VIEW</p>
+              <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+                {["day", "week", "month"].map((v) => (
+                  <button key={v} onClick={() => setCalView(v)} className="qlog-btn"
+                    style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 0", borderRadius: 8, border: "1px solid #33414F", background: calView === v ? accent : "#1F2836", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+
+              {/* XP multiplier breakdown */}
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>HOW XP MULTIPLIERS WORK</p>
+              <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>🔥 Streak bonus (stacks daily)</p>
+                {[["3+ days", "+10%"], ["7+ days", "+20%"], ["14+ days", "+35%"], ["30+ days", "+50%"]].map(([d, b]) => (
+                  <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
+                    <span>{d}</span><span style={{ color: "#C1652B", fontWeight: 700 }}>{b}</span>
+                  </div>
+                ))}
+                <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
+                <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>⚡ Combo bonus (same day)</p>
+                {[["1st–2nd quest", "+0%"], ["3rd–4th quest", "+15%"], ["5th+ quest", "+30%"]].map(([d, b]) => (
+                  <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
+                    <span>{d}</span><span style={{ color: accent, fontWeight: 700 }}>{b}</span>
+                  </div>
+                ))}
+                <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
+                <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Bonuses add together, then apply to the base XP. Beat the focus timer clock for an extra +25% on top.</p>
+              </div>
+
+              {/* Clear all data */}
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>DANGER ZONE</p>
+              {!confirmClear ? (
+                <button onClick={() => setConfirmClear(true)} className="qlog-btn"
+                  style={{ width: "100%", background: "transparent", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A2E44", cursor: "pointer" }}>
+                  Clear all data
+                </button>
+              ) : (
+                <div style={{ background: "rgba(138,46,68,0.1)", border: "1px solid #8A2E44", borderRadius: 10, padding: "14px" }}>
+                  <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 12px", fontWeight: 600 }}>This deletes all quests, XP, streaks, and habits permanently. Are you sure?</p>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={clearAllData} className="qlog-btn" style={{ flex: 1, background: "#8A2E44", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Yes, clear everything</button>
+                    <button onClick={() => setConfirmClear(false)} className="qlog-btn" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
