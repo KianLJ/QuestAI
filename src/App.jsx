@@ -429,7 +429,47 @@ export default function App() {
     }, 800);
   }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyGoal, weeklyCompletedCount, weeklyBonusClaimed, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
 
-  // ---- Focus timer ----
+  // ---- Real-time sync from other devices ----
+  useEffect(() => {
+    if (!loaded) return;
+    const unsub = window.storage.subscribe?.((key, value) => {
+      if (key !== STORAGE_KEY) return;
+      try {
+        const data = JSON.parse(value);
+        // Apply remote state — same migration logic as the initial load
+        const nowMonday = getMondayISO();
+        const dayKeyMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
+        const migratedQuests = (data.quests || []).map((q) => {
+          if (q.date) return q;
+          if (q.day && dayKeyMap[q.day] !== undefined) {
+            const monday = parseLocalDate(nowMonday);
+            monday.setDate(monday.getDate() + dayKeyMap[q.day]);
+            return { ...q, date: localDateStr(monday), day: undefined };
+          }
+          return { ...q, date: todayStr(), day: undefined };
+        });
+        setQuests(migratedQuests);
+        setTotalXP(data.totalXP || 0);
+        setGold(data.gold || 0);
+        setStreak(data.streak || 0);
+        setLastActiveDate(data.lastActiveDate || null);
+        setWeeklyGoal(data.weeklyGoal ?? 10);
+        setWeeklyCompletedCount(data.weeklyCompletedCount || 0);
+        setWeeklyBonusClaimed(!!data.weeklyBonusClaimed);
+        setWeeklyBossId(data.weeklyBossId || null);
+        setWeekStart(data.weekStart || nowMonday);
+        setUnlockedThemes(data.unlockedThemes?.length ? data.unlockedThemes : ["ember"]);
+        setSelectedTheme(data.selectedTheme || "ember");
+        setHabits(data.habits || []);
+        setHabitPerfectDayDate(data.habitPerfectDayDate || null);
+        setHistoryDay({ ...emptyDayCounts(), ...(data.historyDay || {}) });
+        setHistoryDiff({ ...emptyDiffCounts(), ...(data.historyDiff || {}) });
+      } catch (e) {
+        console.error("real-time sync parse error", e);
+      }
+    });
+    return () => unsub?.();
+  }, [loaded]);
   useEffect(() => {
     if (!focus || !focus.running) return;
     const id = setInterval(() => {
