@@ -78,6 +78,37 @@ function Timer({ size = 16, color = "currentColor", className, style }) {
 function Loader2({ size = 16, color = "currentColor", className, style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" className={className} style={style}><path d="M12 2a10 10 0 1 0 10 10" /></svg>;
 }
+// ---- Gear slot icons ----
+function IconAxe({ size = 22, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="18" x2="18" y2="6" /><path d="M11 5l3-3 3 3-3 3z" /><path d="M5 13l-2 4 4-2z" /></svg>;
+}
+function IconStaff({ size = 22, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round"><line x1="12" y1="20" x2="12" y2="5" /><path d="M9 8a3 3 0 0 1 6 0" /><circle cx="12" cy="3" r="1.5" /><line x1="9" y1="12" x2="15" y2="12" /></svg>;
+}
+function IconScythe({ size = 22, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="20" x2="18" y2="7" /><path d="M18 7c0-3-2-5-4-5-3 0-6 3-6 7" /><line x1="5" y1="18" x2="7" y2="20" /></svg>;
+}
+function IconShield({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6z" /></svg>;
+}
+function IconStar({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12,2 15,9 22,9 16,14 18,21 12,17 6,21 8,14 2,9 9,9" /></svg>;
+}
+function IconDragon({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12c0-5 3-8 7-8 2 0 4 1 5 3l3-2-2 4 2 2-3 1c0 3-2 5-5 5-4 0-7-2-7-5z" /><circle cx="9" cy="11" r="1" fill={color} stroke="none" /></svg>;
+}
+function IconSkull({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round"><path d="M8 21h8M9 21v-3M15 21v-3" /><path d="M12 2C7 2 4 5.5 4 9c0 2.5 1 4.5 3 6v3h10v-3c2-1.5 3-3.5 3-6 0-3.5-3-7-8-7z" /><circle cx="9" cy="10" r="1.2" fill={color} stroke="none" /><circle cx="15" cy="10" r="1.2" fill={color} stroke="none" /></svg>;
+}
+function IconCrown({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8l4 4 5-7 5 7 4-4-2 10H5L3 8z" /></svg>;
+}
+function IconTitle({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round"><line x1="4" y1="7" x2="20" y2="7" /><line x1="10" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" /></svg>;
+}
+function IconPalette({ size = 16, color = "currentColor" }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10a2 2 0 0 0 2-2 2 2 0 0 0-.5-1.3c-.4-.5-.4-1.2 0-1.7A2 2 0 0 1 15 16h2a5 5 0 0 0 5-5c0-4.4-4-8-10-8z" /><circle cx="8.5" cy="9.5" r="1.2" fill={color} stroke="none" /><circle cx="15.5" cy="9.5" r="1.2" fill={color} stroke="none" /><circle cx="8.5" cy="14.5" r="1.2" fill={color} stroke="none" /></svg>;
+}
 // ---- End Icons ----
 
 const DIFFICULTIES = [
@@ -101,13 +132,177 @@ const STREAK_MILESTONES = { 3: 15, 7: 30, 14: 60, 30: 150 };
 const HABIT_XP = 3;
 const HABIT_STREAK_MILESTONES = { 3: 5, 7: 10, 21: 25, 66: 50 };
 const PERFECT_DAY_XP = 10;
-const THEMES = [
-  { key: "ember", label: "Ember", color: "#C9A227", cost: 0 },
-  { key: "verdant", label: "Verdant", color: "#4C9A6A", cost: 60 },
-  { key: "arcane", label: "Arcane", color: "#8A5FBF", cost: 90 },
-  { key: "frost", label: "Frost", color: "#4FA3C9", cost: 120 },
-  { key: "blood", label: "Blood", color: "#B33A3A", cost: 150 },
+// ---- Gear & Crate System ----
+const RARITIES = {
+  common:    { label: "Common",    color: "#8A8578", glow: "#8A857833" },
+  rare:      { label: "Rare",      color: "#4FA3C9", glow: "#4FA3C933" },
+  epic:      { label: "Epic",      color: "#8A5FBF", glow: "#8A5FBF33" },
+  legendary: { label: "Legendary", color: "#C9A227", glow: "#C9A22733" },
+};
+
+// icon is a React render function (no emoji) for consistent SVG style
+const ITEM_CATALOGUE = [
+  // ---- THEMES (7) ----
+  { id: "theme_ember",    slot: "theme",  label: "Ember",        value: "#C9A227", rarity: "common",    icon: (c) => <IconPalette size={20} color={c||"#C9A227"} />, desc: "The default warm gold.",      bonuses: {} },
+  { id: "theme_verdant",  slot: "theme",  label: "Verdant",      value: "#4C9A6A", rarity: "common",    icon: (c) => <IconPalette size={20} color={c||"#4C9A6A"} />, desc: "A calm forest green.",         bonuses: {} },
+  { id: "theme_frost",    slot: "theme",  label: "Frost",        value: "#4FA3C9", rarity: "rare",      icon: (c) => <IconPalette size={20} color={c||"#4FA3C9"} />, desc: "Cool arctic blue.",            bonuses: { xpPct: 0.05 } },
+  { id: "theme_arcane",   slot: "theme",  label: "Arcane",       value: "#8A5FBF", rarity: "rare",      icon: (c) => <IconPalette size={20} color={c||"#8A5FBF"} />, desc: "Mysterious arcane purple.",    bonuses: { xpPct: 0.05 } },
+  { id: "theme_blood",    slot: "theme",  label: "Blood Moon",   value: "#B33A3A", rarity: "epic",      icon: (c) => <IconPalette size={20} color={c||"#B33A3A"} />, desc: "The crimson of battle.",       bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "theme_void",     slot: "theme",  label: "Void",         value: "#2A1F3D", rarity: "epic",      icon: (c) => <IconPalette size={20} color={c||"#5A4F7A"} />, desc: "Darkness between stars.",      bonuses: { xpPct: 0.10 } },
+  { id: "theme_solaris",  slot: "theme",  label: "Solaris",      value: "#E8A020", rarity: "legendary", icon: (c) => <IconPalette size={20} color={c||"#E8A020"} />, desc: "Pure radiant gold.",           bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  // ---- TITLES (10) ----
+  { id: "title_rookie",   slot: "title",  label: "The Steadfast",   value: "The Steadfast",   rarity: "common",    icon: (c) => <IconTitle size={20} color={c||"#8A8578"} />, desc: "Reliable and consistent.",       bonuses: {} },
+  { id: "title_keeper",   slot: "title",  label: "Dawn Keeper",     value: "Dawn Keeper",     rarity: "common",    icon: (c) => <IconTitle size={20} color={c||"#8A8578"} />, desc: "First to rise, first to act.",    bonuses: {} },
+  { id: "title_seeker",   slot: "title",  label: "Seeker",          value: "Seeker",          rarity: "common",    icon: (c) => <IconTitle size={20} color={c||"#8A8578"} />, desc: "Always searching.",              bonuses: {} },
+  { id: "title_hunter",   slot: "title",  label: "Quest Hunter",    value: "Quest Hunter",    rarity: "rare",      icon: (c) => <IconTitle size={20} color={c||"#4FA3C9"} />, desc: "Always on the chase.",           bonuses: { xpPct: 0.05 } },
+  { id: "title_shadow",   slot: "title",  label: "Shadow Reaper",   value: "Shadow Reaper",   rarity: "rare",      icon: (c) => <IconTitle size={20} color={c||"#4FA3C9"} />, desc: "Works best in the dark hours.",  bonuses: { xpPct: 0.05 } },
+  { id: "title_storm",    slot: "title",  label: "Stormcaller",     value: "Stormcaller",     rarity: "rare",      icon: (c) => <IconTitle size={20} color={c||"#4FA3C9"} />, desc: "Brings the thunder.",            bonuses: { goldFlat: 1 } },
+  { id: "title_iron",     slot: "title",  label: "Iron Will",       value: "Iron Will",       rarity: "epic",      icon: (c) => <IconTitle size={20} color={c||"#8A5FBF"} />, desc: "Unbreakable under pressure.",    bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "title_eternal",  slot: "title",  label: "Eternal Flame",   value: "Eternal Flame",   rarity: "epic",      icon: (c) => <IconTitle size={20} color={c||"#8A5FBF"} />, desc: "The streak never dies.",         bonuses: { xpPct: 0.10 } },
+  { id: "title_archmage", slot: "title",  label: "Archmage",        value: "Archmage",        rarity: "epic",      icon: (c) => <IconTitle size={20} color={c||"#8A5FBF"} />, desc: "Master of arcane knowledge.",    bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "title_legend",   slot: "title",  label: "The Legendary",   value: "The Legendary",   rarity: "legendary", icon: (c) => <IconTitle size={20} color={c||"#C9A227"} />, desc: "There are no others like you.",  bonuses: { xpPct: 0.20, goldFlat: 3 } },
+  // ---- BADGES (7) ----
+  { id: "badge_shield",   slot: "badge",  label: "Iron Shield",  value: "shield",  rarity: "common",    icon: (c) => <IconShield size={20} color={c||"#8A8578"} />, desc: "A standard-issue badge.",     bonuses: {}, futureStats: { defense: 2 } },
+  { id: "badge_target",   slot: "badge",  label: "Bullseye",     value: "target",  rarity: "common",    icon: (c) => <Target size={20} color={c||"#8A8578"} />,    desc: "Aim true.",                   bonuses: {} },
+  { id: "badge_star",     slot: "badge",  label: "Gold Star",    value: "star",    rarity: "rare",      icon: (c) => <IconStar size={20} color={c||"#4FA3C9"} />,   desc: "Awarded to the dedicated.",   bonuses: { goldFlat: 1 } },
+  { id: "badge_dragon",   slot: "badge",  label: "Dragon Mark",  value: "dragon",  rarity: "rare",      icon: (c) => <IconDragon size={20} color={c||"#4FA3C9"} />, desc: "For those who face big quests.", bonuses: { xpPct: 0.05 } },
+  { id: "badge_flame",    slot: "badge",  label: "Flame Mark",   value: "flame",   rarity: "rare",      icon: (c) => <Flame size={20} color={c||"#C1652B"} />,      desc: "Burns brighter each day.",    bonuses: { xpPct: 0.05 } },
+  { id: "badge_skull",    slot: "badge",  label: "Death Mark",   value: "skull",   rarity: "epic",      icon: (c) => <IconSkull size={20} color={c||"#8A5FBF"} />,  desc: "You have defeated much.",     bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { critChance: 0.05 } },
+  { id: "badge_crown",    slot: "badge",  label: "Crown",        value: "crown",   rarity: "legendary", icon: (c) => <IconCrown size={20} color={c||"#C9A227"} />,  desc: "Worn only by the best.",      bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  // ---- WEAPONS (6) ----
+  { id: "wpn_sword",      slot: "weapon", label: "Iron Sword",     value: "sword",   rarity: "common",    icon: (c) => <Sword size={20} color={c||"#8A8578"} />,       desc: "The classic adventurer's blade.",  bonuses: {} },
+  { id: "wpn_dagger",     slot: "weapon", label: "Shadow Dagger",  value: "dagger",  rarity: "common",    icon: (c) => <Sword size={20} color={c||"#8A8578"} />,       desc: "Swift and silent.",               bonuses: { goldFlat: 1 } },
+  { id: "wpn_axe",        slot: "weapon", label: "Battle Axe",     value: "axe",     rarity: "rare",      icon: (c) => <IconAxe size={20} color={c||"#4FA3C9"} />,     desc: "Heavy and decisive.",              bonuses: { xpPct: 0.05 } },
+  { id: "wpn_staff",      slot: "weapon", label: "Arcane Staff",   value: "staff",   rarity: "epic",      icon: (c) => <IconStaff size={20} color={c||"#8A5FBF"} />,   desc: "Channels pure focus energy.",      bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "wpn_lance",      slot: "weapon", label: "Dawn Lance",     value: "lance",   rarity: "epic",      icon: (c) => <Sword size={20} color={c||"#C9A227"} />,       desc: "Pierces through hesitation.",      bonuses: { xpPct: 0.10, goldFlat: 2 } },
+  { id: "wpn_scythe",     slot: "weapon", label: "Reaper Scythe",  value: "scythe",  rarity: "legendary", icon: (c) => <IconScythe size={20} color={c||"#C9A227"} />,  desc: "The weapon of legends.",           bonuses: { xpPct: 0.20, goldFlat: 3 } },
+  // ---- ARMOUR (5) — bonuses active now; defense/health stubbed for future ----
+  { id: "arm_leather",    slot: "armour", label: "Leather Vest",   value: "leather",  rarity: "common",    icon: (c) => <IconShield size={20} color={c||"#8A8578"} />,  desc: "Light and flexible.",              bonuses: {},              futureStats: { defense: 3,  maxHealth: 10 } },
+  { id: "arm_chain",      slot: "armour", label: "Chainmail",      value: "chain",    rarity: "rare",      icon: (c) => <IconShield size={20} color={c||"#4FA3C9"} />,  desc: "Proven in many battles.",          bonuses: { goldFlat: 1 }, futureStats: { defense: 8,  maxHealth: 20 } },
+  { id: "arm_plate",      slot: "armour", label: "Plate Armour",   value: "plate",    rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#8A5FBF"} />,  desc: "Near impenetrable.",               bonuses: { xpPct: 0.08 }, futureStats: { defense: 18, maxHealth: 35 } },
+  { id: "arm_shadow",     slot: "armour", label: "Shadow Shroud",  value: "shadow",   rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#2A1F3D"} />,  desc: "Woven from darkness itself.",      bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 15, maxHealth: 25 } },
+  { id: "arm_celestial",  slot: "armour", label: "Celestial Mail", value: "celestial",rarity: "legendary", icon: (c) => <IconShield size={20} color={c||"#C9A227"} />,  desc: "Forged in starlight.",             bonuses: { xpPct: 0.15, goldFlat: 2 }, futureStats: { defense: 28, maxHealth: 50 } },
+  // ---- SHIELDS (5) — bonuses active now; block/health stubbed for future ----
+  { id: "shd_buckler",    slot: "shield", label: "Buckler",        value: "buckler",  rarity: "common",    icon: (c) => <IconShield size={20} color={c||"#8A8578"} />,  desc: "Small but dependable.",            bonuses: {},              futureStats: { defense: 2,  blockChance: 0.05 } },
+  { id: "shd_kite",       slot: "shield", label: "Kite Shield",    value: "kite",     rarity: "rare",      icon: (c) => <IconShield size={20} color={c||"#4FA3C9"} />,  desc: "Covers more ground.",              bonuses: { goldFlat: 1 }, futureStats: { defense: 6,  blockChance: 0.10 } },
+  { id: "shd_tower",      slot: "shield", label: "Tower Shield",   value: "tower",    rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#8A5FBF"} />,  desc: "A wall of iron will.",             bonuses: { xpPct: 0.08 }, futureStats: { defense: 15, blockChance: 0.18 } },
+  { id: "shd_voidwall",   slot: "shield", label: "Void Wall",      value: "voidwall", rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#5A4F7A"} />,  desc: "Absorbs darkness.",                bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 12, blockChance: 0.20 } },
+  { id: "shd_aegis",      slot: "shield", label: "Aegis",          value: "aegis",    rarity: "legendary", icon: (c) => <IconShield size={20} color={c||"#C9A227"} />,  desc: "The shield of legends.",           bonuses: { xpPct: 0.12, goldFlat: 2 }, futureStats: { defense: 25, blockChance: 0.30 } },
+  // ---- AURA (5) — visual label on XP bar; futureStats stubbed ----
+  { id: "aura_none",      slot: "aura",   label: "No Aura",        value: null,       rarity: "common",    icon: (c) => <Sparkles size={20} color={c||"#8A8578"} />,    desc: "Plain and simple.",                bonuses: {} },
+  { id: "aura_ember",     slot: "aura",   label: "Blazing",        value: "Blazing",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={c||"#C1652B"} />,    desc: "Your XP burns hotter.",            bonuses: { xpPct: 0.05 } },
+  { id: "aura_frost",     slot: "aura",   label: "Frozen",         value: "Frozen",   rarity: "rare",      icon: (c) => <Sparkles size={20} color={c||"#4FA3C9"} />,    desc: "Cool precision.",                  bonuses: { goldFlat: 1 } },
+  { id: "aura_arcane",    slot: "aura",   label: "Arcane",         value: "Arcane",   rarity: "epic",      icon: (c) => <Sparkles size={20} color={c||"#8A5FBF"} />,    desc: "Arcane energy radiates from you.", bonuses: { xpPct: 0.10 } },
+  { id: "aura_divine",    slot: "aura",   label: "Divine",         value: "Divine",   rarity: "legendary", icon: (c) => <Sparkles size={20} color={c||"#C9A227"} />,    desc: "Blessed by the gods.",             bonuses: { xpPct: 0.15, goldFlat: 2 } },
 ];
+
+// ---- SET BONUSES ----
+const SETS = [
+  {
+    id: "shadow_set",
+    label: "Shadow Set",
+    color: "#8A5FBF",
+    items: ["wpn_scythe", "badge_skull", "title_shadow", "arm_shadow"],
+    requiredCount: 3,
+    bonus: { xpPct: 0.25, goldFlat: 0 },
+    desc: "+25% XP on all quests",
+  },
+  {
+    id: "dawn_set",
+    label: "Dawn Set",
+    color: "#C9A227",
+    items: ["wpn_sword", "badge_shield", "title_keeper", "arm_leather"],
+    requiredCount: 3,
+    bonus: { xpPct: 0, goldFlat: 2 },
+    desc: "+2 gold per quest",
+  },
+  {
+    id: "arcane_set",
+    label: "Arcane Set",
+    color: "#4FA3C9",
+    items: ["wpn_staff", "badge_dragon", "title_archmage", "arm_chain", "shd_kite"],
+    requiredCount: 3,
+    bonus: { xpPct: 0.20, goldFlat: 1 },
+    desc: "+20% XP and +1 gold",
+  },
+  {
+    id: "celestial_set",
+    label: "Celestial Set",
+    color: "#E8A020",
+    items: ["arm_celestial", "shd_aegis", "wpn_lance", "aura_divine", "theme_solaris"],
+    requiredCount: 4,
+    bonus: { xpPct: 0.30, goldFlat: 3 },
+    desc: "+30% XP and +3 gold",
+  },
+  {
+    id: "reaper_set",
+    label: "Reaper Set",
+    color: "#B33A3A",
+    items: ["wpn_scythe", "badge_skull", "title_legend", "theme_blood", "aura_arcane"],
+    requiredCount: 3,
+    bonus: { xpPct: 0.20, goldFlat: 2 },
+    desc: "+20% XP and +2 gold",
+  },
+];
+
+function computeActiveStats(equipped) {
+  // Sum bonuses from all equipped items
+  let xpPct = 0, goldFlat = 0;
+  // Future stats stubbed — not used in gameplay yet
+  let defense = 0, maxHealth = 100, blockChance = 0, critChance = 0;
+
+  Object.values(equipped).forEach((itemId) => {
+    if (!itemId) return;
+    const item = ITEM_CATALOGUE.find((i) => i.id === itemId);
+    if (!item) return;
+    xpPct += item.bonuses?.xpPct || 0;
+    goldFlat += item.bonuses?.goldFlat || 0;
+    defense += item.futureStats?.defense || 0;
+    maxHealth += item.futureStats?.maxHealth || 0;
+    blockChance += item.futureStats?.blockChance || 0;
+    critChance += item.futureStats?.critChance || 0;
+  });
+
+  // Check active sets
+  const activeSets = [];
+  SETS.forEach((set) => {
+    const equippedIds = Object.values(equipped).filter(Boolean);
+    const matches = set.items.filter((id) => equippedIds.includes(id)).length;
+    if (matches >= set.requiredCount) {
+      activeSets.push(set);
+      xpPct += set.bonus.xpPct;
+      goldFlat += set.bonus.goldFlat;
+    }
+  });
+
+  return { xpPct, goldFlat, defense, maxHealth, blockChance, critChance, activeSets };
+}
+
+const CRATE_TIERS = [
+  { id: "wooden", label: "Wooden Crate", icon: (c) => <span style={{ fontSize: 22 }}>📦</span>, cost: 15,  color: "#8A6540", weights: { common: 70, rare: 25, epic: 4,  legendary: 1 } },
+  { id: "iron",   label: "Iron Crate",   icon: (c) => <IconShield size={22} color="#7A8A9A" />, cost: 40,  color: "#7A8A9A", weights: { common: 40, rare: 45, epic: 13, legendary: 2 } },
+  { id: "golden", label: "Golden Crate", icon: (c) => <Trophy size={22} color="#C9A227" />,     cost: 100, color: "#C9A227", weights: { common: 10, rare: 40, epic: 40, legendary: 10 } },
+];
+
+const SLOTS = ["weapon", "armour", "shield", "badge", "title", "theme", "aura"];
+const SLOT_LABELS = { weapon: "Weapon", armour: "Armour", shield: "Shield", badge: "Badge", title: "Title", theme: "Theme", aura: "Aura" };
+const DEFAULT_GEAR = { theme: "theme_ember", title: null, badge: null, weapon: "wpn_sword", armour: null, shield: null, aura: "aura_none" };
+
+function rollCrate(tier, inventory, pityCount) {
+  let weights = { ...tier.weights };
+  if (pityCount >= 9) weights = { common: 0, rare: 0, epic: 0, legendary: 100 };
+  const roll = Math.random() * 100;
+  let rarity;
+  if (roll < weights.legendary) rarity = "legendary";
+  else if (roll < weights.legendary + weights.epic) rarity = "epic";
+  else if (roll < weights.legendary + weights.epic + weights.rare) rarity = "rare";
+  else rarity = "common";
+  const pool = ITEM_CATALOGUE.filter((i) => i.rarity === rarity);
+  const unowned = pool.filter((i) => !inventory.includes(i.id));
+  const finalPool = unowned.length > 0 ? unowned : pool;
+  return finalPool[Math.floor(Math.random() * finalPool.length)];
+}
+
 const STORAGE_KEY = "quest-log-data";
 const XP_BASE = 100;
 const XP_INCREMENT = 15;
@@ -301,8 +496,17 @@ export default function App() {
   const [lastActiveDate, setLastActiveDate] = useState(null);
   const [weeklyBossId, setWeeklyBossId] = useState(null);
   const [weekStart, setWeekStart] = useState(getMondayISO());
-  const [unlockedThemes, setUnlockedThemes] = useState(["ember"]);
-  const [selectedTheme, setSelectedTheme] = useState("ember");
+  const [inventory, setInventory] = useState(["theme_ember", "wpn_sword"]);
+  const [equipped, setEquipped] = useState({ ...DEFAULT_GEAR });
+  const [pityCount, setPityCount] = useState(0);
+  const [crateModalOpen, setCrateModalOpen] = useState(false);
+  const [collectionOpen, setCollectionOpen] = useState(false);
+  const [lastDrop, setLastDrop] = useState(null);
+  const [devMode, setDevMode] = useState(false);
+  const [devGold, setDevGold] = useState("100");
+  const [devXP, setDevXP] = useState("200");
+  const devTapCount = useRef(0);
+  const devTapTimer = useRef(null); // { item, isNew }
   const [historyDay, setHistoryDay] = useState(emptyDayCounts);
   const [historyDiff, setHistoryDiff] = useState(emptyDiffCounts);
   const [habits, setHabits] = useState([]);
@@ -334,22 +538,27 @@ export default function App() {
   const [title, setTitle] = useState("");
   const [difficulty, setDifficulty] = useState("easy");
   const [recurringChoice, setRecurringChoice] = useState(null);
+  const [repeatWeeks, setRepeatWeeks] = useState(2);
+  const [manualMinutes, setManualMinutes] = useState("");
   const [dumpModalOpen, setDumpModalOpen] = useState(false);
   const [dumpText, setDumpText] = useState("");
   const [dumpParsing, setDumpParsing] = useState(false);
   const [dumpError, setDumpError] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
-  const [themeModalOpen, setThemeModalOpen] = useState(false);
+
   const [splittingId, setSplittingId] = useState(null);
   const [splitError, setSplitError] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [moveMenuFor, setMoveMenuFor] = useState(null);
   const [questDetailFor, setQuestDetailFor] = useState(null);
+  const [deleteSeriesPromptFor, setDeleteSeriesPromptFor] = useState(null); // { id, seriesId, title }
   const [dragOverDate, setDragOverDate] = useState(null);
   const [dragOverTrash, setDragOverTrash] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragIdRef = useRef(null);
+  const [confettiPieces, setConfettiPieces] = useState([]);
+  const longPressTimer = useRef(null);
   const saveTimer = useRef(null);
 
   // ---- Load ----
@@ -377,16 +586,11 @@ export default function App() {
           return { ...q, date: today, day: undefined };
         });
 
-        // Reset recurring quests
-        workingQuests = workingQuests.map((q) => {
-          if (!q.recurring || !q.completed) return q;
-          if (q.recurring === "daily" && q.completedAt !== today) {
-            return { ...q, completed: false, completedAt: null, undo: null, date: today };
-          }
-          if (q.recurring === "weekly" && q.completedAt && q.completedAt < nowMonday) {
-            return { ...q, completed: false, completedAt: null, undo: null };
-          }
-          return q;
+        // Reset recurring quests — kept for backwards compat with any old-style recurring quests
+        workingQuests = workingQuests.filter((q) => {
+          // Remove any old-style recurring quests that were generated by the previous system
+          // (they'll be re-added as proper dated instances if the user sets repeat again)
+          return true; // keep all quests, just don't do magic resets anymore
         });
 
         setQuests(workingQuests);
@@ -398,8 +602,9 @@ export default function App() {
         setLastActiveDate(data.lastActiveDate || null);
         setWeekStart(data.weekStart === nowMonday ? data.weekStart : nowMonday);
         setWeeklyBossId(data.weekStart === nowMonday ? (data.weeklyBossId || null) : null);
-        setUnlockedThemes(data.unlockedThemes?.length ? data.unlockedThemes : ["ember"]);
-        setSelectedTheme(data.selectedTheme || "ember");
+        setInventory(data.inventory?.length ? data.inventory : ["theme_ember", "wpn_sword"]);
+        setEquipped(data.equipped ? { ...DEFAULT_GEAR, ...data.equipped } : { ...DEFAULT_GEAR });
+        setPityCount(data.pityCount || 0);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
         if (data.calView) setCalView(data.calView);
@@ -421,12 +626,12 @@ export default function App() {
     saveTimer.current = setTimeout(async () => {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
-          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff,
+          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, pityCount, historyDay, historyDiff,
           habits, habitPerfectDayDate, calView,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, unlockedThemes, selectedTheme, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, pityCount, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -454,8 +659,9 @@ export default function App() {
         setLastActiveDate(data.lastActiveDate || null);
         setWeeklyBossId(data.weeklyBossId || null);
         setWeekStart(data.weekStart || nowMonday);
-        setUnlockedThemes(data.unlockedThemes?.length ? data.unlockedThemes : ["ember"]);
-        setSelectedTheme(data.selectedTheme || "ember");
+        setInventory(data.inventory?.length ? data.inventory : ["theme_ember", "wpn_sword"]);
+        setEquipped(data.equipped ? { ...DEFAULT_GEAR, ...data.equipped } : { ...DEFAULT_GEAR });
+        setPityCount(data.pityCount || 0);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
         setHistoryDay({ ...emptyDayCounts(), ...(data.historyDay || {}) });
@@ -473,13 +679,15 @@ export default function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [focus?.running, focus?.questId]);
-
-  // ---- Derived ----
   const { level, into, need } = levelFromXP(totalXP);
   const rank = rankForLevel(level);
   const nextMilestone = MILESTONE_LEVELS.find((m) => level < m);
-  const accent = THEMES.find((t) => t.key === selectedTheme)?.color || "#C9A227";
+  const accent = (ITEM_CATALOGUE.find((i) => i.id === equipped.theme))?.value || "#C9A227";
   const today = todayStr();
+  const activeStats = computeActiveStats(equipped);
+  const todayInView = calView === "day" ? calAnchor === today
+    : calView === "week" ? getWeekDates(calAnchor).includes(today)
+    : (() => { const d = parseLocalDate(calAnchor); return d.getFullYear() === parseLocalDate(today).getFullYear() && d.getMonth() === parseLocalDate(today).getMonth(); })();
   const timerPct = focus && focus.totalSeconds ? (focus.secondsLeft / focus.totalSeconds) * 100 : 100;
   const timerColor = timerPct > 50 ? "#4C9A6A" : timerPct > 20 ? "#C9A227" : "#8A2E44";
   const bossQuest = weeklyBossId ? quests.find((q) => q.id === weeklyBossId) : null;
@@ -550,13 +758,49 @@ export default function App() {
   }
 
   // ---- Quest actions ----
+  function buildQuestInstances(trimmed, diffKey, reason, estMinutes) {
+    const mins = manualMinutes ? parseInt(manualMinutes, 10) || null : estMinutes || null;
+    const seriesId = recurringChoice ? `series-${Date.now()}` : null;
+    const base = { title: trimmed, difficulty: diffKey, xp: xpFor(diffKey), reason, estMinutes: mins, completed: false, completedAt: null, seriesId };
+    if (!recurringChoice) {
+      return [{ ...base, id: Date.now() + Math.random(), date: addDate }];
+    }
+    const instances = [];
+    const weeks = Math.max(1, Math.min(52, repeatWeeks || 2));
+    for (let w = 0; w < weeks; w++) {
+      const date = recurringChoice === "daily"
+        ? addDaysLocal(addDate, w)          // one per day for N days (we treat weeks as "occurrences" for daily)
+        : addDaysLocal(addDate, w * 7);     // same weekday each week
+      if (recurringChoice === "daily") {
+        // For daily, generate one per day for (weeks * 7) days
+        for (let d = 0; d < 7; d++) {
+          instances.push({ ...base, id: Date.now() + Math.random() + w * 100 + d, date: addDaysLocal(addDate, w * 7 + d) });
+        }
+        break; // handled inside the loop
+      } else {
+        instances.push({ ...base, id: Date.now() + Math.random() + w, date });
+      }
+    }
+    // For daily, rebuild properly
+    if (recurringChoice === "daily") {
+      const totalDays = Math.max(1, Math.min(365, weeks * 7));
+      return Array.from({ length: totalDays }, (_, i) => ({
+        ...base, id: Date.now() + Math.random() + i, date: addDaysLocal(addDate, i),
+      }));
+    }
+    return instances;
+  }
+
   function addQuest() {
     const trimmed = title.trim();
     if (!trimmed) return;
     setAssessError(false);
     const finish = (diffKey, reason, estMinutes, closeDelay = 0) => {
-      setQuests((q) => [{ id: Date.now() + Math.random(), title: trimmed, difficulty: diffKey, xp: xpFor(diffKey), reason, estMinutes: estMinutes || null, date: addDate, recurring: recurringChoice, completed: false, completedAt: null }, ...q]);
+      const instances = buildQuestInstances(trimmed, diffKey, reason, estMinutes);
+      setQuests((q) => [...instances, ...q]);
       setTitle("");
+      setRecurringChoice(null);
+      setManualMinutes("");
       if (closeDelay > 0) setTimeout(() => setAddModalOpen(false), closeDelay);
       else setAddModalOpen(false);
     };
@@ -578,8 +822,11 @@ export default function App() {
   function addQuestManual() {
     const trimmed = title.trim();
     if (!trimmed) return;
-    setQuests((q) => [{ id: Date.now() + Math.random(), title: trimmed, difficulty, xp: xpFor(difficulty), reason: null, estMinutes: null, date: addDate, recurring: recurringChoice, completed: false, completedAt: null }, ...q]);
+    const instances = buildQuestInstances(trimmed, difficulty, null, null);
+    setQuests((q) => [...instances, ...q]);
     setTitle("");
+    setRecurringChoice(null);
+    setManualMinutes("");
     setAssessError(false);
     setAddModalOpen(false);
   }
@@ -628,8 +875,9 @@ export default function App() {
     const boostPct = comboBonusPct(comboOrdinal) + streakBonusPct(effectiveStreak);
     const workXP = quest.xp + beatClockBonus + bossBonus;
     const boostXP = Math.round(workXP * boostPct);
-    const xpGain = workXP + boostXP + milestoneBonus;
-    const goldEarned = Math.max(1, Math.round(xpGain / 10));
+    const gearXP = Math.round((workXP + boostXP) * activeStats.xpPct);
+    const xpGain = workXP + boostXP + gearXP + milestoneBonus;
+    const goldEarned = Math.max(1, Math.round(xpGain / 10) + activeStats.goldFlat);
     const prevLevel = levelFromXP(totalXP).level;
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
@@ -638,11 +886,11 @@ export default function App() {
     setTotalXP(newTotal);
     setGold((g) => g + goldEarned);
     if (streakChanged) { setStreak(newStreak); setLastActiveDate(today); }
-    setXpPop({ id, xp: workXP + boostXP });
+    setXpPop({ id, xp: workXP + boostXP, gearXP, gearPct: activeStats.xpPct, activeSets: activeStats.activeSets });
     setTimeout(() => setXpPop(null), 900);
     if (isBoss) { setBossBanner(true); setTimeout(() => setBossBanner(false), 2400); }
     if (milestoneBonus > 0) { setStreakBanner({ days: newStreak, bonus: milestoneBonus }); setTimeout(() => setStreakBanner(null), 2400); }
-    if (newLevel > prevLevel) { setLevelUp({ level: newLevel, rank: rankForLevel(newLevel) }); setTimeout(() => setLevelUp(null), 2400); }
+    if (newLevel > prevLevel) { setLevelUp({ level: newLevel, rank: rankForLevel(newLevel) }); spawnConfetti(); setTimeout(() => setLevelUp(null), 2400); }
     setFocus((f) => f && f.questId === id ? null : f);
     setFocusOpen(false);
     setQuestDetailFor(null);
@@ -654,15 +902,34 @@ export default function App() {
     const undo = quest.undo || { xpAwarded: quest.xp, goldAwarded: 1, streakIncremented: false, prevStreak: streak, prevLastActiveDate: lastActiveDate };
     setTotalXP((t) => Math.max(0, t - undo.xpAwarded));
     setGold((g) => Math.max(0, g - (undo.goldAwarded || 0)));
-    setWeeklyCompletedCount((c) => Math.max(0, c - 1));
     if (undo.streakIncremented) { setStreak(undo.prevStreak); setLastActiveDate(undo.prevLastActiveDate); }
     setQuests((qs) => qs.map((q) => q.id === id ? { ...q, completed: false, completedAt: null, undo: null } : q));
   }
 
   function deleteQuest(id) {
+    const quest = quests.find((q) => q.id === id);
+    if (quest?.seriesId) {
+      setDeleteSeriesPromptFor({ id, seriesId: quest.seriesId, title: quest.title });
+      setQuestDetailFor(null);
+      return;
+    }
     setQuests((qs) => qs.filter((q) => q.id !== id));
     if (weeklyBossId === id) setWeeklyBossId(null);
     setQuestDetailFor(null);
+  }
+
+  function deleteQuestOnly(id) {
+    setQuests((qs) => qs.filter((q) => q.id !== id));
+    if (weeklyBossId === id) setWeeklyBossId(null);
+    setQuestDetailFor(null);
+    setDeleteSeriesPromptFor(null);
+  }
+
+  function deleteQuestSeries(seriesId) {
+    setQuests((qs) => qs.filter((q) => q.seriesId !== seriesId));
+    setWeeklyBossId((b) => { const kept = quests.find((q) => q.id === b && q.seriesId !== seriesId); return kept ? b : null; });
+    setQuestDetailFor(null);
+    setDeleteSeriesPromptFor(null);
   }
 
   function moveQuestToDate(id, date) {
@@ -713,7 +980,7 @@ export default function App() {
     setTimeout(() => setHabitXpPop(null), 900);
     if (perfectDayEarned) { setPerfectDayBanner(true); setTimeout(() => setPerfectDayBanner(false), 2400); }
     else if (milestoneBonus > 0) { setHabitBanner({ name: habit.name, days: newStreak, bonus: milestoneBonus }); setTimeout(() => setHabitBanner(null), 2400); }
-    if (newLevel > prevLevel) { setLevelUp({ level: newLevel, rank: rankForLevel(newLevel) }); setTimeout(() => setLevelUp(null), 2400); }
+    if (newLevel > prevLevel) { setLevelUp({ level: newLevel, rank: rankForLevel(newLevel) }); spawnConfetti(); setTimeout(() => setLevelUp(null), 2400); }
   }
   function uncompleteHabit(id) {
     const habit = habits.find((h) => h.id === id);
@@ -745,6 +1012,10 @@ export default function App() {
     setWeeklyBossId(null);
     setHistoryDay(emptyDayCounts());
     setHistoryDiff(emptyDiffCounts());
+    setInventory(["theme_ember", "wpn_sword"]);
+    setEquipped({ ...DEFAULT_GEAR });
+    setPityCount(0);
+    setLastDrop(null);
     setHabits([
       { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
       { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
@@ -755,38 +1026,73 @@ export default function App() {
     setSettingsOpen(false);
   }
 
-    function unlockOrEquipTheme(theme) {
-    if (unlockedThemes.includes(theme.key)) { setSelectedTheme(theme.key); return; }
-    if (gold < theme.cost) return;
-    setGold((g) => g - theme.cost);
-    setUnlockedThemes((u) => [...u, theme.key]);
-    setSelectedTheme(theme.key);
+    function spawnConfetti() {
+    const colors = [accent, "#4C9A6A", "#C1652B", "#8A5FBF", "#4FA3C9", "#C9A227"];
+    const pieces = Array.from({ length: 36 }, (_, i) => ({
+      id: i,
+      left: `${Math.random() * 100}vw`,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      duration: `${0.9 + Math.random() * 0.8}s`,
+      delay: `${Math.random() * 0.4}s`,
+      size: `${6 + Math.random() * 6}px`,
+    }));
+    setConfettiPieces(pieces);
+    setTimeout(() => setConfettiPieces([]), 2000);
+  }
+
+  function equipItem(itemId) {
+    const item = ITEM_CATALOGUE.find((i) => i.id === itemId);
+    if (!item || !inventory.includes(itemId)) return;
+    setEquipped((e) => ({ ...e, [item.slot]: itemId }));
+  }
+
+  function openCrate(tier) {
+    if (gold < tier.cost) return;
+    const item = rollCrate(tier, inventory, pityCount);
+    const isNew = !inventory.includes(item.id);
+    const newPity = item.rarity === "legendary" ? 0 : pityCount + 1;
+    setGold((g) => g - tier.cost);
+    setPityCount(newPity);
+    if (isNew) setInventory((inv) => [...inv, item.id]);
+    setLastDrop({ item, isNew });
   }
 
   // ---- Quest card (compact for calendar cells) ----
   function QuestDot({ q }) {
     const diff = DIFFICULTIES.find((d) => d.key === q.difficulty);
     const isOverdue = !q.completed && q.date < today;
-    const swipeRef = useRef(null);
     const startXRef = useRef(null);
     const [swipeOffset, setSwipeOffset] = useState(0);
-    const [swipeAction, setSwipeAction] = useState(null); // "complete" | "delete" | null
+    const [swipeAction, setSwipeAction] = useState(null);
+    const isDotTouchRef = useRef(false);
 
     function onTouchStart(e) {
+      if (isDotTouchRef.current) return;
       startXRef.current = e.touches[0].clientX;
       setSwipeOffset(0);
       setSwipeAction(null);
+      // Long-press: 600ms hold triggers delete
+      longPressTimer.current = setTimeout(() => {
+        startXRef.current = null; // cancel swipe
+        deleteQuest(q.id);
+      }, 600);
     }
     function onTouchMove(e) {
-      if (startXRef.current === null) return;
+      if (isDotTouchRef.current || startXRef.current === null) return;
       const dx = e.touches[0].clientX - startXRef.current;
+      if (Math.abs(dx) > 4 && longPressTimer.current) {
+        clearTimeout(longPressTimer.current); // moved — not a long press
+        longPressTimer.current = null;
+      }
+      if (Math.abs(dx) < 4) return;
       const clamped = Math.max(-80, Math.min(80, dx));
       setSwipeOffset(clamped);
-      if (clamped > 36) setSwipeAction("complete");
-      else if (clamped < -36) setSwipeAction("delete");
-      else setSwipeAction(null);
+      setSwipeAction(clamped > 36 ? "complete" : clamped < -36 ? "delete" : null);
     }
     function onTouchEnd() {
+      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+      if (isDotTouchRef.current) { isDotTouchRef.current = false; return; }
+      if (startXRef.current === null) return; // was a long press, already handled
       if (swipeAction === "complete" && !q.completed) completeQuest(q.id);
       else if (swipeAction === "delete") deleteQuest(q.id);
       setSwipeOffset(0);
@@ -794,30 +1100,31 @@ export default function App() {
       startXRef.current = null;
     }
 
-    const swipeBg = swipeAction === "complete" ? "#4C9A6A"
-                  : swipeAction === "delete" ? "#8A2E44"
-                  : "transparent";
-
     return (
-      <div ref={swipeRef} style={{ position: "relative", marginBottom: 2, borderRadius: 4, overflow: "hidden" }}>
-        {/* Swipe hint background */}
-        {swipeOffset !== 0 && (
-          <div style={{ position: "absolute", inset: 0, background: swipeBg, display: "flex", alignItems: "center", justifyContent: swipeOffset > 0 ? "flex-start" : "flex-end", padding: "0 10px", fontSize: 12, color: "#EDE4D3", fontWeight: 700, transition: "background 0.1s ease" }}>
-            {swipeOffset > 0 ? "✓ Complete" : "✕ Delete"}
-          </div>
-        )}
+      <div style={{ position: "relative", marginBottom: 2, borderRadius: 4, overflow: "hidden", height: 22 }}>
+        {/* Revealed background — green on right, red on left */}
+        <div style={{
+          position: "absolute", inset: 0, display: "flex", alignItems: "center",
+          justifyContent: swipeOffset > 0 ? "flex-start" : "flex-end",
+          paddingLeft: swipeOffset > 0 ? 8 : 0, paddingRight: swipeOffset < 0 ? 8 : 0,
+          background: swipeAction === "complete" ? "#4C9A6A" : swipeAction === "delete" ? "#8A2E44" : "#1F2836",
+          borderRadius: 4, transition: "background 0.1s ease",
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#EDE4D3" }}>
+            {swipeAction === "complete" ? "✓" : swipeAction === "delete" ? "✕" : ""}
+          </span>
+        </div>
+
+        {/* Card slides over the background */}
         <div
           draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("text/plain", String(q.id));
-            dragIdRef.current = q.id;
-            setTimeout(() => setIsDragging(true), 0);
-          }}
+          onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(q.id)); dragIdRef.current = q.id; setTimeout(() => setIsDragging(true), 0); }}
           onDragEnd={() => { dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); setDragOverTrash(false); }}
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
           style={{
+            position: "absolute", inset: 0,
             display: "flex", alignItems: "center", gap: 4, padding: "2px 4px", borderRadius: 4,
             background: q.completed ? "#1F2836" : isOverdue ? "rgba(138,46,68,0.15)" : "#232E3D",
             borderLeft: `2px solid ${isOverdue && !q.completed ? "#8A2E44" : diff.color}`,
@@ -825,16 +1132,17 @@ export default function App() {
             transform: `translateX(${swipeOffset}px)`,
             transition: swipeOffset === 0 ? "transform 0.2s ease" : "none",
           }}>
-          {/* Quick-complete dot — tap to complete without opening detail */}
+          {/* Quick-complete dot */}
           <div
-            onClick={(e) => { e.stopPropagation(); e.preventDefault(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
-            onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); }}
-            style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer", padding: 4, margin: -4 }}
+            onTouchStart={(e) => { isDotTouchRef.current = true; e.stopPropagation(); }}
+            onTouchEnd={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
+            onClick={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
+            style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer", padding: 5, margin: -5 }}
             title={q.completed ? "Undo" : "Complete"}
           />
           <span
             onClick={() => setQuestDetailFor(q.id)}
-            style={{ fontSize: 11, lineHeight: 1.2, color: isOverdue && !q.completed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 120, flex: 1, cursor: "pointer" }}>
+            style={{ fontSize: 11, lineHeight: 1.2, color: isOverdue && !q.completed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer" }}>
             {isOverdue && !q.completed ? "⚠ " : ""}{q.title}
           </span>
         </div>
@@ -885,7 +1193,7 @@ export default function App() {
             {!q.completed ? (
               <button onClick={() => completeQuest(q.id)} className="qlog-btn" style={{ width: 22, height: 22, minWidth: 22, borderRadius: "50%", border: `2px solid ${diff.color}`, background: "transparent", cursor: "pointer", marginTop: 2 }} />
             ) : (
-              <button onClick={() => uncompleteQuest(q.id)} className="qlog-btn" style={{ width: 22, height: 22, minWidth: 22, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2, cursor: "pointer" }}>
+              <button onClick={() => { uncompleteQuest(q.id); setQuestDetailFor(null); }} className="qlog-btn" style={{ width: 22, height: 22, minWidth: 22, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2, cursor: "pointer" }}>
                 <Check size={13} color="#141C27" />
               </button>
             )}
@@ -960,6 +1268,13 @@ export default function App() {
         .spin { animation: spin 0.8s linear infinite; }
         @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
         .pulse { animation: pulse 1s ease-in-out infinite; }
+        @keyframes todayPulse { 0%,100% { box-shadow: 0 0 0 0 ${accent}44; } 50% { box-shadow: 0 0 0 6px ${accent}00; } }
+        .today-glow { animation: todayPulse 2s ease-in-out infinite; }
+        @keyframes confettiFall {
+          0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+        .confetti-piece { position: fixed; width: 8px; height: 8px; border-radius: 2px; animation: confettiFall linear forwards; pointer-events: none; z-index: 999; }
         input:focus, select:focus, textarea:focus { outline: 2px solid ${accent}; outline-offset: 2px; }
         button:focus-visible { outline: 2px solid ${accent}; outline-offset: 2px; }
         input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }
@@ -967,12 +1282,30 @@ export default function App() {
         .cal-col::-webkit-scrollbar-thumb { background: #33414F; border-radius: 2px; }
       `}</style>
 
+      {/* XP pop with gear bonus breakdown */}
+      {xpPop && (
+        <div className="xp-pop" style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", zIndex: 65, background: "#232E3D", border: `1px solid ${accent}`, borderRadius: 10, padding: "8px 16px", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 20px rgba(0,0,0,0.5)", whiteSpace: "nowrap" }}>
+          <span style={{ fontWeight: 700, fontSize: 14, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{xpPop.xp} XP</span>
+          {xpPop.gearXP > 0 && (
+            <span style={{ fontSize: 11, color: RARITIES.epic.color, fontFamily: "ui-monospace, Menlo, monospace" }}>⚔ +{xpPop.gearXP} ({Math.round(xpPop.gearPct * 100)}%)</span>
+          )}
+          {xpPop.activeSets?.length > 0 && (
+            <span style={{ fontSize: 11, color: RARITIES.legendary.color, fontFamily: "ui-monospace, Menlo, monospace" }}>✦ Set</span>
+          )}
+        </div>
+      )}
+
       {/* Banners */}
       {levelUp && <div className="level-banner" style={{ position: "fixed", top: 24, left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${accent}, #8A2E44)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Trophy size={22} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 15 }}>Level {levelUp.level} — {levelUp.rank}</span></div>}
       {streakBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C1652B, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{streakBanner.days}-day streak! +{streakBanner.bonus} XP</span></div>}
       {bossBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #8A5FBF, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Crown size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>Boss defeated! Bonus XP earned.</span></div>}
       {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 14 }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
       {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
+
+      {/* Confetti burst on level up */}
+      {confettiPieces.map((p) => (
+        <div key={p.id} className="confetti-piece" style={{ left: p.left, top: 0, background: p.color, width: p.size, height: p.size, animationDuration: p.duration, animationDelay: p.delay }} />
+      ))}
 
       {/* Floating timer */}
       {focus && focus.started && !focusOpen && (
@@ -1017,14 +1350,50 @@ export default function App() {
       {questDetailFor && <QuestDetailModal questId={questDetailFor} />}
       {moveMenuFor && <MoveModal questId={moveMenuFor} />}
 
+      {deleteSeriesPromptFor && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
+          onClick={() => setDeleteSeriesPromptFor(null)}>
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Delete repeated quest?</h3>
+            <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 18px" }}>
+              <strong style={{ color: "#EDE4D3" }}>"{deleteSeriesPromptFor.title}"</strong> is part of a repeat series. Delete just this one, or the whole series?
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={() => deleteQuestOnly(deleteSeriesPromptFor.id)} className="qlog-btn"
+                style={{ background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "11px 0", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>
+                Delete this one only
+              </button>
+              <button onClick={() => deleteQuestSeries(deleteSeriesPromptFor.seriesId)} className="qlog-btn"
+                style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>
+                Delete entire series
+              </button>
+              <button onClick={() => setDeleteSeriesPromptFor(null)} className="qlog-btn"
+                style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 12px 0" }}>
-        {/* Header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <Sword size={22} color={accent} />
-            <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>QuestAI</h1>
+            <span>{(() => { const w = ITEM_CATALOGUE.find((i) => i.id === equipped.weapon); return w ? w.icon(accent) : <Sword size={22} color={accent} />; })()}</span>
+            <div>
+              <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>QuestAI</h1>
+              {(equipped.badge || equipped.title) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 1 }}>
+                  {equipped.badge && <span>{(() => { const b = ITEM_CATALOGUE.find((i) => i.id === equipped.badge); return b ? b.icon(RARITIES[b.rarity].color) : null; })()}</span>}
+                  {equipped.title && <span style={{ fontSize: 10, color: accent, fontWeight: 600 }}>{ITEM_CATALOGUE.find((i) => i.id === equipped.title)?.value}</span>}
+                </div>
+              )}
+            </div>
           </div>
-          <button onClick={() => setThemeModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button onClick={() => setCollectionOpen(true)} className="qlog-btn" style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", padding: 4 }} title="Collection">🎒</button>
+            <button onClick={() => setCrateModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
+          </div>
         </div>
 
         {/* XP / Streak + Action buttons */}
@@ -1032,12 +1401,20 @@ export default function App() {
           <div style={{ flex: "1 1 200px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontWeight: 700, fontSize: 18, color: accent, fontFamily: "Georgia, serif" }}>Lv {level}</span>
+                <span onClick={() => {
+                  devTapCount.current += 1;
+                  if (devTapTimer.current) clearTimeout(devTapTimer.current);
+                  devTapTimer.current = setTimeout(() => { devTapCount.current = 0; }, 1500);
+                  if (devTapCount.current >= 5) { devTapCount.current = 0; setDevMode((v) => !v); }
+                }} style={{ fontWeight: 700, fontSize: 18, color: accent, fontFamily: "Georgia, serif", cursor: "default", userSelect: "none" }}>Lv {level}</span>
                 <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "#8A8578" }}>{into}/{need} XP</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <Flame size={14} color={streak > 0 ? "#C1652B" : "#4A5563"} fill={streak > 0 ? "#C1652B" : "none"} />
                 <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, fontSize: 12, color: streak > 0 ? "#C1652B" : "#8A8578" }}>{streak}d</span>
+                {streak > 0 && lastActiveDate && lastActiveDate < yesterdayStr() && (
+                  <span style={{ fontSize: 10, color: "#8A2E44", fontWeight: 600 }}>❄ missed</span>
+                )}
               </div>
             </div>
             <div style={{ fontSize: 10, color: "#8A8578", marginBottom: 6 }}>{rank}{nextMilestone && ` · Lv ${nextMilestone} next trophy`}</div>
@@ -1071,11 +1448,28 @@ export default function App() {
           </div>
         </div>
 
+        {/* Dev mode panel — tap level 5x to toggle */}
+        {devMode && (
+          <div style={{ background: "#0D1117", border: "2px dashed #C9A227", borderRadius: 10, padding: "12px 14px", marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace" }}>⚗ DEV MODE</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="number" value={devGold} onChange={(e) => setDevGold(e.target.value)} style={{ width: 60, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }} />
+              <button onClick={() => setGold((g) => g + Math.max(0, Number(devGold) || 0))} className="qlog-btn" style={{ background: "#C9A227", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+Gold</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="number" value={devXP} onChange={(e) => setDevXP(e.target.value)} style={{ width: 60, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }} />
+              <button onClick={() => setTotalXP((x) => x + Math.max(0, Number(devXP) || 0))} className="qlog-btn" style={{ background: "#4C9A6A", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+XP</button>
+            </div>
+            <button onClick={() => { setInventory(ITEM_CATALOGUE.map((i) => i.id)); }} className="qlog-btn" style={{ background: "#8A5FBF", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Unlock All</button>
+            <button onClick={() => setDevMode(false)} style={{ background: "none", border: "none", color: "#5C6773", fontSize: 11, cursor: "pointer", marginLeft: "auto" }}>close</button>
+          </div>
+        )}
+
         {/* Calendar header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button onClick={() => navCalendar(-1)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", cursor: "pointer" }}><ChevronLeft size={16} /></button>
-            <button onClick={() => { setCalAnchor(today); setSelectedDate(today); }} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", color: "#EDE4D3", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Today</button>
+            <button onClick={() => { setCalAnchor(today); setSelectedDate(today); }} className={`qlog-btn${!todayInView ? " today-glow" : ""}`} style={{ background: !todayInView ? accent + "22" : "#232E3D", border: `1px solid ${!todayInView ? accent : "#33414F"}`, borderRadius: 6, padding: "5px 10px", color: !todayInView ? accent : "#EDE4D3", cursor: "pointer", fontSize: 12, fontWeight: 600, position: "relative" }}>Today{!todayInView && <span style={{ position: "absolute", top: -3, right: -3, width: 7, height: 7, borderRadius: "50%", background: accent, border: "1.5px solid #1B2430" }} />}</button>
             <button onClick={() => navCalendar(1)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", cursor: "pointer" }}><ChevronRight size={16} /></button>
             <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", marginLeft: 4 }}>
               {calView === "day" && parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
@@ -1188,6 +1582,15 @@ export default function App() {
                       </div>
                       {active > 0 && <div style={{ fontSize: 9, fontWeight: 700, color: hasOverdue ? "#C1652B" : accent, lineHeight: 1.4 }}>{hasOverdue ? "⚠ " : ""}{active} quest{active !== 1 ? "s" : ""}</div>}
                       {done > 0 && <div style={{ fontSize: 9, color: "#4C9A6A", lineHeight: 1.4 }}>✓ {done}</div>}
+                      {active > 0 && (
+                        <div style={{ display: "flex", gap: 2, marginTop: 2, flexWrap: "wrap" }}>
+                          {quests.filter((q) => q.date === date && !q.completed).slice(0, 4).map((q) => {
+                            const d = DIFFICULTIES.find((df) => df.key === q.difficulty);
+                            return <div key={q.id} style={{ width: 5, height: 5, borderRadius: "50%", background: d?.color || accent }} />;
+                          })}
+                          {active > 4 && <div style={{ fontSize: 8, color: "#5C6773" }}>+{active - 4}</div>}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1249,7 +1652,7 @@ export default function App() {
         {addModalOpen && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 380, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
-              <button onClick={() => { setAddModalOpen(false); setAssessError(false); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+              <button onClick={() => { setAddModalOpen(false); setAssessError(false); setRecurringChoice(null); setManualMinutes(""); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
               <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>New Quest</h3>
               <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && (aiQuotaExhausted || assessError ? addQuestManual() : addQuest())} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, opacity: assessing ? 0.6 : 1 }} />
 
@@ -1273,16 +1676,30 @@ export default function App() {
                   </div>
                 </div>
               )}
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Date:</p>
+              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Start date:</p>
               <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+
               <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Repeat:</p>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: recurringChoice ? 10 : 16 }}>
                 {[{ key: null, label: "None" }, { key: "daily", label: "Daily" }, { key: "weekly", label: "Weekly" }].map((r) => (
                   <button key={r.label} onClick={() => setRecurringChoice(r.key)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1.5px solid #33414F", background: recurringChoice === r.key ? accent : "transparent", color: recurringChoice === r.key ? "#1B2430" : "#8A8578" }}>
                     {r.key && <Repeat size={11} />} {r.label}
                   </button>
                 ))}
               </div>
+              {recurringChoice && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, background: "#1F2836", borderRadius: 8, padding: "8px 12px" }}>
+                  <span style={{ fontSize: 12, color: "#8A8578" }}>For</span>
+                  <input type="number" min={1} max={52} value={repeatWeeks} onChange={(e) => setRepeatWeeks(Math.max(1, Math.min(52, Number(e.target.value) || 1)))}
+                    style={{ width: 52, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, textAlign: "center" }} />
+                  <span style={{ fontSize: 12, color: "#8A8578" }}>
+                    {recurringChoice === "daily" ? `weeks (${Math.max(1, repeatWeeks) * 7} quests)` : `weeks (${Math.max(1, repeatWeeks)} quests)`}
+                  </span>
+                </div>
+              )}
+
+              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Focus timer (minutes, optional):</p>
+              <input type="number" min={1} max={240} value={manualMinutes} onChange={(e) => setManualMinutes(e.target.value)} placeholder="AI will estimate if blank" style={{ width: "100%", marginBottom: 16, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
               <button onClick={aiQuotaExhausted || assessError ? addQuestManual : addQuest} className="qlog-btn" disabled={assessing || !title.trim()} style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: assessing || !title.trim() ? "default" : "pointer", opacity: assessing || !title.trim() ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}>
                 {assessing ? <Loader2 size={18} className="spin" /> : <Plus size={18} />} {assessing ? "Assessing..." : aiQuotaExhausted || assessError ? "Add Quest" : "Add Quest (AI)"}
               </button>
@@ -1393,29 +1810,172 @@ export default function App() {
           </div>
         )}
 
-        {themeModalOpen && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-            <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 360, position: "relative" }}>
-              <button onClick={() => setThemeModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><Coins size={15} color="#C9A227" /><span style={{ fontSize: 12, color: "#8A8578", fontWeight: 600 }}>{gold} GOLD</span></div>
-              <h3 style={{ margin: "4px 0 14px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Themes</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {THEMES.map((t) => {
-                  const unlocked = unlockedThemes.includes(t.key);
-                  const equipped = selectedTheme === t.key;
-                  const canAfford = gold >= t.cost;
+        {/* Crate Shop Modal */}
+        {crateModalOpen && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.82)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setCrateModalOpen(false)}>
+            <div style={{ background: "#1B2430", border: "1px solid #33414F", borderRadius: 16, width: "100%", maxWidth: 400, position: "relative", maxHeight: "90vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+              {/* Sticky header */}
+              <div style={{ position: "sticky", top: 0, background: "#1B2430", borderRadius: "16px 16px 0 0", borderBottom: "1px solid #33414F", padding: "16px 22px 12px", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}><Coins size={15} color="#C9A227" /><span style={{ fontSize: 13, color: "#C9A227", fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{gold}g</span></div>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, fontFamily: "Georgia, serif" }}>Crate Shop</h3>
+                </div>
+                <button onClick={() => setCrateModalOpen(false)} aria-label="Close" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "6px 10px", color: "#EDE4D3", cursor: "pointer" }}><X size={16} /></button>
+              </div>
+              {/* Scrollable body */}
+              <div style={{ overflowY: "auto", padding: "16px 22px 22px" }}>
+              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 18px" }}>Open crates to discover gear. Earn gold by completing quests.</p>
+
+              {/* Last drop result */}
+              {lastDrop && (
+                <div style={{ background: RARITIES[lastDrop.item.rarity].glow, border: `1px solid ${RARITIES[lastDrop.item.rarity].color}`, borderRadius: 12, padding: "14px 16px", marginBottom: 18, textAlign: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 44, marginBottom: 6 }}>{lastDrop.item.icon(RARITIES[lastDrop.item.rarity].color)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: RARITIES[lastDrop.item.rarity].color }}>{lastDrop.item.label}</div>
+                  <div style={{ fontSize: 11, color: "#8A8578", margin: "3px 0" }}>{lastDrop.item.desc}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: RARITIES[lastDrop.item.rarity].color, textTransform: "uppercase", letterSpacing: 1 }}>
+                    {RARITIES[lastDrop.item.rarity].label} · {lastDrop.isNew ? "✨ New item!" : "Duplicate"}
+                  </div>
+                  {lastDrop.isNew && (
+                    <button onClick={() => { equipItem(lastDrop.item.id); setLastDrop(null); setCrateModalOpen(false); }} className="qlog-btn"
+                      style={{ marginTop: 10, background: accent, border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>
+                      Equip now
+                    </button>
+                  )}
+                  <button onClick={() => setLastDrop(null)} style={{ display: "block", margin: "8px auto 0", background: "none", border: "none", fontSize: 11, color: "#5C6773", cursor: "pointer" }}>Dismiss</button>
+                </div>
+              )}
+
+              {/* Crate tiers */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {CRATE_TIERS.map((tier) => {
+                  const canAfford = gold >= tier.cost;
                   return (
-                    <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 10, background: "#1F2836", border: `1px solid ${equipped ? t.color : "#2C3947"}`, borderRadius: 10, padding: "10px 12px" }}>
-                      <div style={{ width: 20, height: 20, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{t.label}</span>
-                      <button onClick={() => unlockOrEquipTheme(t)} disabled={equipped || (!unlocked && !canAfford)} className="qlog-btn" style={{ fontSize: 11, fontWeight: 700, padding: "5px 9px", borderRadius: 8, border: "none", cursor: equipped ? "default" : "pointer", background: equipped ? "#141C27" : unlocked ? t.color : canAfford ? "#3A4552" : "#2C3947", color: equipped ? "#8A8578" : unlocked ? "#1B2430" : canAfford ? "#EDE4D3" : "#5C6773", display: "flex", alignItems: "center", gap: 3 }}>
-                        {equipped ? "Equipped" : unlocked ? "Equip" : <>{!canAfford && <Lock size={10} />}{t.cost}g</>}
-                      </button>
+                    <div key={tier.id} style={{ background: "#232E3D", border: `1px solid ${tier.color}33`, borderRadius: 12, padding: "14px 16px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                        <span style={{ fontSize: 26 }}>{tier.icon}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: tier.color }}>{tier.label}</div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                            {Object.entries(tier.weights).map(([r, w]) => w > 0 && (
+                              <span key={r} style={{ fontSize: 9, fontWeight: 700, color: RARITIES[r].color, textTransform: "uppercase" }}>{RARITIES[r].label} {w}%</span>
+                            ))}
+                          </div>
+                        </div>
+                        <button onClick={() => openCrate(tier)} disabled={!canAfford} className="qlog-btn"
+                          style={{ background: canAfford ? tier.color : "#2C3947", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, color: canAfford ? "#1B2430" : "#5C6773", cursor: canAfford ? "pointer" : "default" }}>
+                          {tier.cost}g
+                        </button>
+                      </div>
+                      {pityCount > 0 && tier.id === "wooden" && (
+                        <div style={{ fontSize: 9, color: "#5C6773" }}>Legendary pity: {pityCount}/10</div>
+                      )}
                     </div>
                   );
                 })}
               </div>
-              <p style={{ fontSize: 10, color: "#5C6773", margin: "12px 0 0" }}>Earn gold automatically as you complete quests.</p>
+              <p style={{ fontSize: 10, color: "#5C6773", margin: "14px 0 0", textAlign: "center" }}>Pity system: guaranteed Legendary every 10 opens without one.</p>
+              </div>{/* end scrollable body */}
+            </div>
+          </div>
+        )}
+
+        {/* Collection / Gear Modal */}
+        {collectionOpen && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.82)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setCollectionOpen(false)}>
+            <div style={{ background: "#1B2430", border: "1px solid #33414F", borderRadius: 16, width: "100%", maxWidth: 440, position: "relative", maxHeight: "90vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+              {/* Sticky header */}
+              <div style={{ position: "sticky", top: 0, background: "#1B2430", borderRadius: "16px 16px 0 0", borderBottom: "1px solid #33414F", padding: "16px 22px 12px", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h3 style={{ margin: "0 0 2px", fontSize: 17, fontWeight: 700, fontFamily: "Georgia, serif" }}>⚔ Gear & Collection</h3>
+                  <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>{inventory.length} / {ITEM_CATALOGUE.length} items · Tap to equip</p>
+                </div>
+                <button onClick={() => setCollectionOpen(false)} aria-label="Close" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "6px 10px", color: "#EDE4D3", cursor: "pointer" }}><X size={16} /></button>
+              </div>
+
+              <div style={{ overflowY: "auto", padding: "16px 22px 22px" }}>
+                {/* Progress bar */}
+                <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 14 }}>
+                  <div style={{ height: "100%", width: `${(inventory.length / ITEM_CATALOGUE.length) * 100}%`, background: `linear-gradient(90deg, #4C9A6A, ${accent})`, borderRadius: 4 }} />
+                </div>
+
+                {/* Active stats panel */}
+                <div style={{ background: "#232E3D", border: `1px solid ${activeStats.activeSets.length > 0 ? "#C9A227" : "#33414F"}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+                  {activeStats.activeSets.length > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#C9A227", textTransform: "uppercase", letterSpacing: 0.5 }}>✦ Active Sets</span>
+                    </div>
+                  )}
+                  {activeStats.activeSets.map((s) => (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color }} />
+                      <span style={{ fontSize: 11, fontWeight: 600, color: s.color }}>{s.label}</span>
+                      <span style={{ fontSize: 11, color: "#8A8578" }}>— {s.desc}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: activeStats.activeSets.length > 0 ? 8 : 0 }}>
+                    <span style={{ fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
+                    <span style={{ fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat} gold/quest</span>
+                    <span style={{ fontSize: 11, color: "#5C6773" }}>🛡 {activeStats.defense} DEF · ❤ {activeStats.maxHealth} HP (future)</span>
+                  </div>
+                </div>
+
+                {/* Set bonus guide */}
+                <div style={{ marginBottom: 16 }}>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.5 }}>Set Bonuses</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {SETS.map((s) => {
+                      const equippedIds = Object.values(equipped).filter(Boolean);
+                      const matches = s.items.filter((id) => equippedIds.includes(id)).length;
+                      const isActive = matches >= s.requiredCount;
+                      return (
+                        <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, background: isActive ? s.color + "22" : "#232E3D", border: `1px solid ${isActive ? s.color : "#2C3947"}`, borderRadius: 8, padding: "7px 10px" }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: isActive ? s.color : "#3A4552", flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: isActive ? s.color : "#8A8578" }}>{s.label}</span>
+                            <span style={{ fontSize: 10, color: "#5C6773" }}> — {s.desc}</span>
+                          </div>
+                          <span style={{ fontSize: 10, color: isActive ? s.color : "#5C6773", fontWeight: 700 }}>{matches}/{s.requiredCount}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Item grid by slot */}
+                {SLOTS.map((slot) => {
+                  const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === slot);
+                  return (
+                    <div key={slot} style={{ marginBottom: 20 }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.5 }}>{SLOT_LABELS[slot]}</p>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))", gap: 8 }}>
+                        {slotItems.map((item) => {
+                          const owned = inventory.includes(item.id);
+                          const isEquipped = equipped[slot] === item.id;
+                          const rar = RARITIES[item.rarity];
+                          const hasBonus = Object.values(item.bonuses || {}).some((v) => v > 0);
+                          return (
+                            <div key={item.id} onClick={() => owned && equipItem(item.id)}
+                              style={{ background: isEquipped ? rar.glow : owned ? "#232E3D" : "#1A2330", border: `1.5px solid ${isEquipped ? rar.color : owned ? rar.color + "55" : "#2C3947"}`, borderRadius: 10, padding: "10px 6px", textAlign: "center", cursor: owned ? "pointer" : "default", position: "relative", opacity: owned ? 1 : 0.45 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, marginBottom: 4, filter: owned ? "none" : "grayscale(1)" }}>
+                                {owned ? item.icon(rar.color) : <Lock size={16} color="#4A5563" />}
+                              </div>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: owned ? rar.color : "#4A5563", lineHeight: 1.2 }}>{owned ? item.label : "???"}</div>
+                              {owned && hasBonus && (
+                                <div style={{ fontSize: 8, color: "#4C9A6A", marginTop: 2 }}>
+                                  {item.bonuses.xpPct ? `+${Math.round(item.bonuses.xpPct * 100)}%XP ` : ""}
+                                  {item.bonuses.goldFlat ? `+${item.bonuses.goldFlat}g` : ""}
+                                </div>
+                              )}
+                              {isEquipped && <div style={{ position: "absolute", top: 4, right: 4, width: 7, height: 7, borderRadius: "50%", background: rar.color }} />}
+                              {owned && !isEquipped && <div style={{ fontSize: 8, color: "#5C6773", marginTop: 1 }}>tap</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
