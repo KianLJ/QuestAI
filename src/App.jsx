@@ -132,125 +132,294 @@ const STREAK_MILESTONES = { 3: 15, 7: 30, 14: 60, 30: 150 };
 const HABIT_XP = 3;
 const HABIT_STREAK_MILESTONES = { 3: 5, 7: 10, 21: 25, 66: 50 };
 const PERFECT_DAY_XP = 10;
+// ---- Enemy SVG silhouettes ----
+// ---- Enemy icon-style visuals (clean line art) ----
+function EnemySlime({ size = 72, dead = false }) {
+  const c = dead ? "#3A4552" : "#4C9A6A";
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" style={{ opacity: dead ? 0.4 : 1 }}>
+    <ellipse cx="32" cy="40" rx="22" ry="16" fill={c} opacity="0.25" stroke={c} strokeWidth="1.5"/>
+    <ellipse cx="32" cy="30" rx="16" ry="15" fill={c} opacity="0.2" stroke={c} strokeWidth="2"/>
+    <circle cx="26" cy="27" r="3" fill={c} stroke={c} strokeWidth="1"/>
+    <circle cx="38" cy="27" r="3" fill={c} stroke={c} strokeWidth="1"/>
+    <circle cx="27" cy="26" r="1" fill="#1B2430"/>
+    <circle cx="39" cy="26" r="1" fill="#1B2430"/>
+    <path d="M27 34 Q32 38 37 34" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none"/>
+    <path d="M18 28 Q14 22 16 18" stroke={c} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+    <path d="M46 28 Q50 22 48 18" stroke={c} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+  </svg>;
+}
+function EnemySkeleton({ size = 72, dead = false }) {
+  const c = dead ? "#3A4552" : "#B8C4CE";
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" style={{ opacity: dead ? 0.4 : 1 }}>
+    <circle cx="32" cy="14" r="9" stroke={c} strokeWidth="2" fill="none"/>
+    <circle cx="27" cy="12" r="2" fill={c}/>
+    <circle cx="37" cy="12" r="2" fill={c}/>
+    <path d="M28 18 Q32 21 36 18" stroke={c} strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+    <rect x="26" y="23" width="12" height="16" rx="2" stroke={c} strokeWidth="1.5" fill="none"/>
+    <line x1="32" y1="23" x2="32" y2="39" stroke={c} strokeWidth="1" opacity="0.5"/>
+    <line x1="18" y1="27" x2="26" y2="30" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="38" y1="30" x2="46" y2="27" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="27" y1="39" x2="24" y2="55" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="37" y1="39" x2="40" y2="55" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="44" y1="24" x2="50" y2="18" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+  </svg>;
+}
+function EnemyKnight({ size = 72, dead = false }) {
+  const c = dead ? "#3A4552" : "#4FA3C9";
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" style={{ opacity: dead ? 0.4 : 1 }}>
+    <rect x="20" y="6" width="24" height="18" rx="6" stroke={c} strokeWidth="2" fill="none"/>
+    <rect x="24" y="11" width="16" height="7" rx="1.5" stroke={c} strokeWidth="1" fill={c} opacity="0.2"/>
+    <rect x="18" y="24" width="28" height="20" rx="3" stroke={c} strokeWidth="2" fill="none"/>
+    <line x1="18" y1="34" x2="8" y2="30" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="8" y1="30" x2="8" y2="44" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="46" y1="30" x2="56" y2="26" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="56" y1="26" x2="56" y2="40" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="24" y1="44" x2="22" y2="58" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="40" y1="44" x2="42" y2="58" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="60" y1="14" x2="60" y2="36" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="56" y1="14" x2="64" y2="14" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+  </svg>;
+}
+function EnemyDarkKnight({ size = 72, dead = false }) {
+  const c = dead ? "#3A4552" : "#8A5FBF";
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" style={{ opacity: dead ? 0.4 : 1 }}>
+    <rect x="18" y="4" width="28" height="20" rx="6" stroke={c} strokeWidth="2" fill="none"/>
+    <rect x="22" y="10" width="20" height="8" rx="1.5" stroke={c} strokeWidth="1" fill={c} opacity="0.25"/>
+    <path d="M18 4 L12 0 M46 4 L52 0" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <rect x="16" y="24" width="32" height="22" rx="3" stroke={c} strokeWidth="2" fill="none"/>
+    <line x1="16" y1="35" x2="6" y2="30" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="6" y1="30" x2="4" y2="46" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="48" y1="30" x2="58" y2="26" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="58" y1="26" x2="60" y2="42" stroke={c} strokeWidth="2" strokeLinecap="round"/>
+    <line x1="22" y1="46" x2="20" y2="62" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="42" y1="46" x2="44" y2="62" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="4" y1="22" x2="4" y2="46" stroke={c} strokeWidth="3" strokeLinecap="round"/>
+    <circle cx="4" cy="18" r="4" stroke={c} strokeWidth="2" fill="none"/>
+    <circle cx="28" cy="15" r="2" fill={c} opacity="0.5"/>
+    <circle cx="36" cy="15" r="2" fill={c} opacity="0.5"/>
+  </svg>;
+}
+function EnemyDragon({ size = 72, dead = false }) {
+  const c = dead ? "#3A4552" : "#C9A227";
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" style={{ opacity: dead ? 0.4 : 1 }}>
+    <ellipse cx="32" cy="38" rx="18" ry="14" stroke={c} strokeWidth="2" fill={c} opacity="0.15"/>
+    <ellipse cx="32" cy="28" rx="14" ry="13" stroke={c} strokeWidth="2" fill={c} opacity="0.15"/>
+    <path d="M18 22 L8 10 L16 22" stroke={c} strokeWidth="2" strokeLinejoin="round" fill={c} opacity="0.3"/>
+    <path d="M46 22 L56 10 L48 22" stroke={c} strokeWidth="2" strokeLinejoin="round" fill={c} opacity="0.3"/>
+    <circle cx="26" cy="26" r="3.5" stroke={c} strokeWidth="1.5" fill="none"/>
+    <circle cx="38" cy="26" r="3.5" stroke={c} strokeWidth="1.5" fill="none"/>
+    <circle cx="27" cy="26" r="1.5" fill={c}/>
+    <circle cx="39" cy="26" r="1.5" fill={c}/>
+    <path d="M27 35 Q32 40 37 35" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none"/>
+    <path d="M27 37 L25 42 M32 38 L32 44 M37 37 L39 42" stroke={c} strokeWidth="1.5" strokeLinecap="round"/>
+    <path d="M50 38 Q58 30 54 22 Q50 34 46 36" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none"/>
+    <line x1="24" y1="52" x2="22" y2="62" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="40" y1="52" x2="42" y2="62" stroke={c} strokeWidth="2.5" strokeLinecap="round"/>
+  </svg>;
+}
+function EnemyBossIcon({ size = 72, dead = false }) {
+  const c = "#C9A227";
+  const body = dead ? "#3A4552" : "#8A2E44";
+  return <svg width={size} height={size} viewBox="0 0 64 64" fill="none" style={{ opacity: dead ? 0.4 : 1 }}>
+    <ellipse cx="32" cy="38" rx="18" ry="14" stroke={body} strokeWidth="2" fill={body} opacity="0.2"/>
+    <ellipse cx="32" cy="28" rx="14" ry="13" stroke={body} strokeWidth="2" fill={body} opacity="0.2"/>
+    <path d="M18 22 L8 10 L16 22" stroke={body} strokeWidth="2" strokeLinejoin="round" fill={body} opacity="0.4"/>
+    <path d="M46 22 L56 10 L48 22" stroke={body} strokeWidth="2" strokeLinejoin="round" fill={body} opacity="0.4"/>
+    <circle cx="26" cy="26" r="3.5" stroke={c} strokeWidth="1.5" fill="none"/>
+    <circle cx="38" cy="26" r="3.5" stroke={c} strokeWidth="1.5" fill="none"/>
+    <circle cx="27" cy="26" r="1.5" fill={c}/>
+    <circle cx="39" cy="26" r="1.5" fill={c}/>
+    <path d="M27 35 Q32 40 37 35" stroke={c} strokeWidth="2" strokeLinecap="round" fill="none"/>
+    <path d="M50 38 Q58 30 54 22 Q50 34 46 36" stroke={body} strokeWidth="2" strokeLinecap="round" fill="none"/>
+    <line x1="24" y1="52" x2="22" y2="62" stroke={body} strokeWidth="2.5" strokeLinecap="round"/>
+    <line x1="40" y1="52" x2="42" y2="62" stroke={body} strokeWidth="2.5" strokeLinecap="round"/>
+    {/* Crown */}
+    <path d="M20 16 L23 8 L28 14 L32 4 L36 14 L41 8 L44 16 Z" stroke={c} strokeWidth="1.5" fill={c} opacity="0.9"/>
+    <circle cx="32" cy="4" r="2" fill={c}/>
+    <ellipse cx="32" cy="28" rx="16" ry="15" stroke={c} strokeWidth="1.5" fill="none" opacity="0.4"/>
+  </svg>;
+}
+
+function getEnemyVisual(enemy, size = 72) {
+  const dead = enemy.hp <= 0;
+  if (enemy.isBoss) return <EnemyBossIcon size={size} dead={dead} />;
+  switch (enemy.difficulty) {
+    case "trivial": return <EnemySlime size={size} dead={dead} />;
+    case "easy":    return <EnemySkeleton size={size} dead={dead} />;
+    case "medium":  return <EnemyKnight size={size} dead={dead} />;
+    case "hard":    return <EnemyDarkKnight size={size} dead={dead} />;
+    case "epic":    return <EnemyDragon size={size} dead={dead} />;
+    default:        return <EnemySkeleton size={size} dead={dead} />;
+  }
+}
+
 // ---- Gear & Crate System ----
 const RARITIES = {
-  common:    { label: "Common",    color: "#8A8578", glow: "#8A857833" },
-  rare:      { label: "Rare",      color: "#4FA3C9", glow: "#4FA3C933" },
-  epic:      { label: "Epic",      color: "#8A5FBF", glow: "#8A5FBF33" },
-  legendary: { label: "Legendary", color: "#C9A227", glow: "#C9A22733" },
+  common:    { label: "Common",    color: "#8A8578", glow: "#8A857822" },
+  rare:      { label: "Rare",      color: "#4FA3C9", glow: "#4FA3C922" },
+  epic:      { label: "Epic",      color: "#8A5FBF", glow: "#8A5FBF22" },
+  legendary: { label: "Legendary", color: "#C9A227", glow: "#C9A22722" },
 };
 
-// icon is a React render function (no emoji) for consistent SVG style
+const W = (c, def) => c || def;
 const ITEM_CATALOGUE = [
-  // ---- THEMES (7) ----
-  { id: "theme_ember",    slot: "theme",  label: "Ember",        value: "#C9A227", rarity: "common",    icon: (c) => <IconPalette size={20} color={c||"#C9A227"} />, desc: "The default warm gold.",      bonuses: {} },
-  { id: "theme_verdant",  slot: "theme",  label: "Verdant",      value: "#4C9A6A", rarity: "common",    icon: (c) => <IconPalette size={20} color={c||"#4C9A6A"} />, desc: "A calm forest green.",         bonuses: {} },
-  { id: "theme_frost",    slot: "theme",  label: "Frost",        value: "#4FA3C9", rarity: "rare",      icon: (c) => <IconPalette size={20} color={c||"#4FA3C9"} />, desc: "Cool arctic blue.",            bonuses: { xpPct: 0.05 } },
-  { id: "theme_arcane",   slot: "theme",  label: "Arcane",       value: "#8A5FBF", rarity: "rare",      icon: (c) => <IconPalette size={20} color={c||"#8A5FBF"} />, desc: "Mysterious arcane purple.",    bonuses: { xpPct: 0.05 } },
-  { id: "theme_blood",    slot: "theme",  label: "Blood Moon",   value: "#B33A3A", rarity: "epic",      icon: (c) => <IconPalette size={20} color={c||"#B33A3A"} />, desc: "The crimson of battle.",       bonuses: { xpPct: 0.10, goldFlat: 1 } },
-  { id: "theme_void",     slot: "theme",  label: "Void",         value: "#2A1F3D", rarity: "epic",      icon: (c) => <IconPalette size={20} color={c||"#5A4F7A"} />, desc: "Darkness between stars.",      bonuses: { xpPct: 0.10 } },
-  { id: "theme_solaris",  slot: "theme",  label: "Solaris",      value: "#E8A020", rarity: "legendary", icon: (c) => <IconPalette size={20} color={c||"#E8A020"} />, desc: "Pure radiant gold.",           bonuses: { xpPct: 0.15, goldFlat: 2 } },
-  // ---- TITLES (10) ----
-  { id: "title_rookie",   slot: "title",  label: "The Steadfast",   value: "The Steadfast",   rarity: "common",    icon: (c) => <IconTitle size={20} color={c||"#8A8578"} />, desc: "Reliable and consistent.",       bonuses: {} },
-  { id: "title_keeper",   slot: "title",  label: "Dawn Keeper",     value: "Dawn Keeper",     rarity: "common",    icon: (c) => <IconTitle size={20} color={c||"#8A8578"} />, desc: "First to rise, first to act.",    bonuses: {} },
-  { id: "title_seeker",   slot: "title",  label: "Seeker",          value: "Seeker",          rarity: "common",    icon: (c) => <IconTitle size={20} color={c||"#8A8578"} />, desc: "Always searching.",              bonuses: {} },
-  { id: "title_hunter",   slot: "title",  label: "Quest Hunter",    value: "Quest Hunter",    rarity: "rare",      icon: (c) => <IconTitle size={20} color={c||"#4FA3C9"} />, desc: "Always on the chase.",           bonuses: { xpPct: 0.05 } },
-  { id: "title_shadow",   slot: "title",  label: "Shadow Reaper",   value: "Shadow Reaper",   rarity: "rare",      icon: (c) => <IconTitle size={20} color={c||"#4FA3C9"} />, desc: "Works best in the dark hours.",  bonuses: { xpPct: 0.05 } },
-  { id: "title_storm",    slot: "title",  label: "Stormcaller",     value: "Stormcaller",     rarity: "rare",      icon: (c) => <IconTitle size={20} color={c||"#4FA3C9"} />, desc: "Brings the thunder.",            bonuses: { goldFlat: 1 } },
-  { id: "title_iron",     slot: "title",  label: "Iron Will",       value: "Iron Will",       rarity: "epic",      icon: (c) => <IconTitle size={20} color={c||"#8A5FBF"} />, desc: "Unbreakable under pressure.",    bonuses: { xpPct: 0.10, goldFlat: 1 } },
-  { id: "title_eternal",  slot: "title",  label: "Eternal Flame",   value: "Eternal Flame",   rarity: "epic",      icon: (c) => <IconTitle size={20} color={c||"#8A5FBF"} />, desc: "The streak never dies.",         bonuses: { xpPct: 0.10 } },
-  { id: "title_archmage", slot: "title",  label: "Archmage",        value: "Archmage",        rarity: "epic",      icon: (c) => <IconTitle size={20} color={c||"#8A5FBF"} />, desc: "Master of arcane knowledge.",    bonuses: { xpPct: 0.12, goldFlat: 1 } },
-  { id: "title_legend",   slot: "title",  label: "The Legendary",   value: "The Legendary",   rarity: "legendary", icon: (c) => <IconTitle size={20} color={c||"#C9A227"} />, desc: "There are no others like you.",  bonuses: { xpPct: 0.20, goldFlat: 3 } },
-  // ---- BADGES (7) ----
-  { id: "badge_shield",   slot: "badge",  label: "Iron Shield",  value: "shield",  rarity: "common",    icon: (c) => <IconShield size={20} color={c||"#8A8578"} />, desc: "A standard-issue badge.",     bonuses: {}, futureStats: { defense: 2 } },
-  { id: "badge_target",   slot: "badge",  label: "Bullseye",     value: "target",  rarity: "common",    icon: (c) => <Target size={20} color={c||"#8A8578"} />,    desc: "Aim true.",                   bonuses: {} },
-  { id: "badge_star",     slot: "badge",  label: "Gold Star",    value: "star",    rarity: "rare",      icon: (c) => <IconStar size={20} color={c||"#4FA3C9"} />,   desc: "Awarded to the dedicated.",   bonuses: { goldFlat: 1 } },
-  { id: "badge_dragon",   slot: "badge",  label: "Dragon Mark",  value: "dragon",  rarity: "rare",      icon: (c) => <IconDragon size={20} color={c||"#4FA3C9"} />, desc: "For those who face big quests.", bonuses: { xpPct: 0.05 } },
-  { id: "badge_flame",    slot: "badge",  label: "Flame Mark",   value: "flame",   rarity: "rare",      icon: (c) => <Flame size={20} color={c||"#C1652B"} />,      desc: "Burns brighter each day.",    bonuses: { xpPct: 0.05 } },
-  { id: "badge_skull",    slot: "badge",  label: "Death Mark",   value: "skull",   rarity: "epic",      icon: (c) => <IconSkull size={20} color={c||"#8A5FBF"} />,  desc: "You have defeated much.",     bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { critChance: 0.05 } },
-  { id: "badge_crown",    slot: "badge",  label: "Crown",        value: "crown",   rarity: "legendary", icon: (c) => <IconCrown size={20} color={c||"#C9A227"} />,  desc: "Worn only by the best.",      bonuses: { xpPct: 0.15, goldFlat: 2 } },
-  // ---- WEAPONS (6) ----
-  { id: "wpn_sword",      slot: "weapon", label: "Iron Sword",     value: "sword",   rarity: "common",    icon: (c) => <Sword size={20} color={c||"#8A8578"} />,       desc: "The classic adventurer's blade.",  bonuses: {} },
-  { id: "wpn_dagger",     slot: "weapon", label: "Shadow Dagger",  value: "dagger",  rarity: "common",    icon: (c) => <Sword size={20} color={c||"#8A8578"} />,       desc: "Swift and silent.",               bonuses: { goldFlat: 1 } },
-  { id: "wpn_axe",        slot: "weapon", label: "Battle Axe",     value: "axe",     rarity: "rare",      icon: (c) => <IconAxe size={20} color={c||"#4FA3C9"} />,     desc: "Heavy and decisive.",              bonuses: { xpPct: 0.05 } },
-  { id: "wpn_staff",      slot: "weapon", label: "Arcane Staff",   value: "staff",   rarity: "epic",      icon: (c) => <IconStaff size={20} color={c||"#8A5FBF"} />,   desc: "Channels pure focus energy.",      bonuses: { xpPct: 0.12, goldFlat: 1 } },
-  { id: "wpn_lance",      slot: "weapon", label: "Dawn Lance",     value: "lance",   rarity: "epic",      icon: (c) => <Sword size={20} color={c||"#C9A227"} />,       desc: "Pierces through hesitation.",      bonuses: { xpPct: 0.10, goldFlat: 2 } },
-  { id: "wpn_scythe",     slot: "weapon", label: "Reaper Scythe",  value: "scythe",  rarity: "legendary", icon: (c) => <IconScythe size={20} color={c||"#C9A227"} />,  desc: "The weapon of legends.",           bonuses: { xpPct: 0.20, goldFlat: 3 } },
-  // ---- ARMOUR (5) — bonuses active now; defense/health stubbed for future ----
-  { id: "arm_leather",    slot: "armour", label: "Leather Vest",   value: "leather",  rarity: "common",    icon: (c) => <IconShield size={20} color={c||"#8A8578"} />,  desc: "Light and flexible.",              bonuses: {},              futureStats: { defense: 3,  maxHealth: 10 } },
-  { id: "arm_chain",      slot: "armour", label: "Chainmail",      value: "chain",    rarity: "rare",      icon: (c) => <IconShield size={20} color={c||"#4FA3C9"} />,  desc: "Proven in many battles.",          bonuses: { goldFlat: 1 }, futureStats: { defense: 8,  maxHealth: 20 } },
-  { id: "arm_plate",      slot: "armour", label: "Plate Armour",   value: "plate",    rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#8A5FBF"} />,  desc: "Near impenetrable.",               bonuses: { xpPct: 0.08 }, futureStats: { defense: 18, maxHealth: 35 } },
-  { id: "arm_shadow",     slot: "armour", label: "Shadow Shroud",  value: "shadow",   rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#2A1F3D"} />,  desc: "Woven from darkness itself.",      bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 15, maxHealth: 25 } },
-  { id: "arm_celestial",  slot: "armour", label: "Celestial Mail", value: "celestial",rarity: "legendary", icon: (c) => <IconShield size={20} color={c||"#C9A227"} />,  desc: "Forged in starlight.",             bonuses: { xpPct: 0.15, goldFlat: 2 }, futureStats: { defense: 28, maxHealth: 50 } },
-  // ---- SHIELDS (5) — bonuses active now; block/health stubbed for future ----
-  { id: "shd_buckler",    slot: "shield", label: "Buckler",        value: "buckler",  rarity: "common",    icon: (c) => <IconShield size={20} color={c||"#8A8578"} />,  desc: "Small but dependable.",            bonuses: {},              futureStats: { defense: 2,  blockChance: 0.05 } },
-  { id: "shd_kite",       slot: "shield", label: "Kite Shield",    value: "kite",     rarity: "rare",      icon: (c) => <IconShield size={20} color={c||"#4FA3C9"} />,  desc: "Covers more ground.",              bonuses: { goldFlat: 1 }, futureStats: { defense: 6,  blockChance: 0.10 } },
-  { id: "shd_tower",      slot: "shield", label: "Tower Shield",   value: "tower",    rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#8A5FBF"} />,  desc: "A wall of iron will.",             bonuses: { xpPct: 0.08 }, futureStats: { defense: 15, blockChance: 0.18 } },
-  { id: "shd_voidwall",   slot: "shield", label: "Void Wall",      value: "voidwall", rarity: "epic",      icon: (c) => <IconShield size={20} color={c||"#5A4F7A"} />,  desc: "Absorbs darkness.",                bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 12, blockChance: 0.20 } },
-  { id: "shd_aegis",      slot: "shield", label: "Aegis",          value: "aegis",    rarity: "legendary", icon: (c) => <IconShield size={20} color={c||"#C9A227"} />,  desc: "The shield of legends.",           bonuses: { xpPct: 0.12, goldFlat: 2 }, futureStats: { defense: 25, blockChance: 0.30 } },
-  // ---- AURA (5) — visual label on XP bar; futureStats stubbed ----
-  { id: "aura_none",      slot: "aura",   label: "No Aura",        value: null,       rarity: "common",    icon: (c) => <Sparkles size={20} color={c||"#8A8578"} />,    desc: "Plain and simple.",                bonuses: {} },
-  { id: "aura_ember",     slot: "aura",   label: "Blazing",        value: "Blazing",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={c||"#C1652B"} />,    desc: "Your XP burns hotter.",            bonuses: { xpPct: 0.05 } },
-  { id: "aura_frost",     slot: "aura",   label: "Frozen",         value: "Frozen",   rarity: "rare",      icon: (c) => <Sparkles size={20} color={c||"#4FA3C9"} />,    desc: "Cool precision.",                  bonuses: { goldFlat: 1 } },
-  { id: "aura_arcane",    slot: "aura",   label: "Arcane",         value: "Arcane",   rarity: "epic",      icon: (c) => <Sparkles size={20} color={c||"#8A5FBF"} />,    desc: "Arcane energy radiates from you.", bonuses: { xpPct: 0.10 } },
-  { id: "aura_divine",    slot: "aura",   label: "Divine",         value: "Divine",   rarity: "legendary", icon: (c) => <Sparkles size={20} color={c||"#C9A227"} />,    desc: "Blessed by the gods.",             bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  // ===== COSMETICS =====
+  // ---- THEMES (9) ----
+  { id: "theme_ember",     slot: "theme", category: "cosmetic", label: "Ember",         value: "#C9A227", rarity: "common",    icon: (c) => <IconPalette size={20} color={W(c,"#C9A227")} />, desc: "The default warm gold.",           bonuses: {} },
+  { id: "theme_verdant",   slot: "theme", category: "cosmetic", label: "Verdant",        value: "#4C9A6A", rarity: "common",    icon: (c) => <IconPalette size={20} color={W(c,"#4C9A6A")} />, desc: "A calm forest green.",              bonuses: {} },
+  { id: "theme_slate",     slot: "theme", category: "cosmetic", label: "Slate",          value: "#5C7A8A", rarity: "common",    icon: (c) => <IconPalette size={20} color={W(c,"#5C7A8A")} />, desc: "Cool grey-blue tones.",             bonuses: {} },
+  { id: "theme_frost",     slot: "theme", category: "cosmetic", label: "Frost",          value: "#4FA3C9", rarity: "rare",      icon: (c) => <IconPalette size={20} color={W(c,"#4FA3C9")} />, desc: "Cool arctic blue.",                 bonuses: { xpPct: 0.05 } },
+  { id: "theme_arcane",    slot: "theme", category: "cosmetic", label: "Arcane",         value: "#8A5FBF", rarity: "rare",      icon: (c) => <IconPalette size={20} color={W(c,"#8A5FBF")} />, desc: "Mysterious arcane purple.",         bonuses: { xpPct: 0.05 } },
+  { id: "theme_crimson",   slot: "theme", category: "cosmetic", label: "Crimson Dawn",   value: "#C1652B", rarity: "rare",      icon: (c) => <IconPalette size={20} color={W(c,"#C1652B")} />, desc: "Dawn breaks in crimson.",           bonuses: { goldFlat: 1 } },
+  { id: "theme_blood",     slot: "theme", category: "cosmetic", label: "Blood Moon",     value: "#B33A3A", rarity: "epic",      icon: (c) => <IconPalette size={20} color={W(c,"#B33A3A")} />, desc: "The crimson of battle.",            bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "theme_void",      slot: "theme", category: "cosmetic", label: "Void",           value: "#2A1F3D", rarity: "epic",      icon: (c) => <IconPalette size={20} color={W(c,"#5A4F7A")} />, desc: "Darkness between stars.",           bonuses: { xpPct: 0.10 } },
+  { id: "theme_abyss",     slot: "theme", category: "cosmetic", label: "Abyss",          value: "#0D1117", rarity: "epic",      icon: (c) => <IconPalette size={20} color={W(c,"#3A3A5A")} />, desc: "Total darkness.",                   bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "theme_storm",     slot: "theme", category: "cosmetic", label: "Stormbreak",     value: "#7A9ABF", rarity: "epic",      icon: (c) => <IconPalette size={20} color={W(c,"#7A9ABF")} />, desc: "Electric storm sky.",               bonuses: { xpPct: 0.08, goldFlat: 1 } },
+  { id: "theme_solaris",   slot: "theme", category: "cosmetic", label: "Solaris",        value: "#E8A020", rarity: "legendary", icon: (c) => <IconPalette size={20} color={W(c,"#E8A020")} />, desc: "Pure radiant gold.",                bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  { id: "theme_nebula",    slot: "theme", category: "cosmetic", label: "Nebula",         value: "#7A4FA8", rarity: "legendary", icon: (c) => <IconPalette size={20} color={W(c,"#7A4FA8")} />, desc: "Born from stardust.",               bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  // ---- TITLES (16) ----
+  { id: "title_rookie",    slot: "title", category: "cosmetic", label: "The Steadfast",  value: "The Steadfast",  rarity: "common",    icon: (c) => <IconTitle size={20} color={W(c,"#8A8578")} />, desc: "Reliable and consistent.",     bonuses: {} },
+  { id: "title_keeper",    slot: "title", category: "cosmetic", label: "Dawn Keeper",    value: "Dawn Keeper",    rarity: "common",    icon: (c) => <IconTitle size={20} color={W(c,"#8A8578")} />, desc: "First to rise, first to act.", bonuses: {} },
+  { id: "title_seeker",    slot: "title", category: "cosmetic", label: "Seeker",         value: "Seeker",         rarity: "common",    icon: (c) => <IconTitle size={20} color={W(c,"#8A8578")} />, desc: "Always searching.",            bonuses: {} },
+  { id: "title_wanderer",  slot: "title", category: "cosmetic", label: "Wanderer",       value: "Wanderer",       rarity: "common",    icon: (c) => <IconTitle size={20} color={W(c,"#8A8578")} />, desc: "No quest is too far.",         bonuses: {} },
+  { id: "title_initiate",  slot: "title", category: "cosmetic", label: "The Initiate",   value: "The Initiate",   rarity: "common",    icon: (c) => <IconTitle size={20} color={W(c,"#8A8578")} />, desc: "Just getting started.",        bonuses: {} },
+  { id: "title_hunter",    slot: "title", category: "cosmetic", label: "Quest Hunter",   value: "Quest Hunter",   rarity: "rare",      icon: (c) => <IconTitle size={20} color={W(c,"#4FA3C9")} />, desc: "Always on the chase.",         bonuses: { xpPct: 0.05 } },
+  { id: "title_shadow",    slot: "title", category: "cosmetic", label: "Shadow Reaper",  value: "Shadow Reaper",  rarity: "rare",      icon: (c) => <IconTitle size={20} color={W(c,"#4FA3C9")} />, desc: "Works best in the dark.",      bonuses: { xpPct: 0.05 } },
+  { id: "title_storm",     slot: "title", category: "cosmetic", label: "Stormcaller",    value: "Stormcaller",    rarity: "rare",      icon: (c) => <IconTitle size={20} color={W(c,"#4FA3C9")} />, desc: "Brings the thunder.",          bonuses: { goldFlat: 1 } },
+  { id: "title_focused",   slot: "title", category: "cosmetic", label: "The Focused",    value: "The Focused",    rarity: "rare",      icon: (c) => <IconTitle size={20} color={W(c,"#4FA3C9")} />, desc: "Laser precision.",             bonuses: { xpPct: 0.05 } },
+  { id: "title_voidwalk",  slot: "title", category: "cosmetic", label: "Void Walker",    value: "Void Walker",    rarity: "rare",      icon: (c) => <IconTitle size={20} color={W(c,"#4FA3C9")} />, desc: "Moves through shadows.",       bonuses: { goldFlat: 1 } },
+  { id: "title_iron",      slot: "title", category: "cosmetic", label: "Iron Will",      value: "Iron Will",      rarity: "epic",      icon: (c) => <IconTitle size={20} color={W(c,"#8A5FBF")} />, desc: "Unbreakable under pressure.",  bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "title_eternal",   slot: "title", category: "cosmetic", label: "Eternal Flame",  value: "Eternal Flame",  rarity: "epic",      icon: (c) => <IconTitle size={20} color={W(c,"#8A5FBF")} />, desc: "The streak never dies.",       bonuses: { xpPct: 0.10 } },
+  { id: "title_archmage",  slot: "title", category: "cosmetic", label: "Archmage",       value: "Archmage",       rarity: "epic",      icon: (c) => <IconTitle size={20} color={W(c,"#8A5FBF")} />, desc: "Master of arcane knowledge.",  bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "title_bloodknight",slot:"title", category: "cosmetic", label: "Blood Knight",   value: "Blood Knight",   rarity: "epic",      icon: (c) => <IconTitle size={20} color={W(c,"#8A5FBF")} />, desc: "Sworn to the crimson oath.",   bonuses: { xpPct: 0.10, goldFlat: 2 } },
+  { id: "title_starforged",slot: "title", category: "cosmetic", label: "Star Forged",    value: "Star Forged",    rarity: "epic",      icon: (c) => <IconTitle size={20} color={W(c,"#8A5FBF")} />, desc: "Tempered in celestial fire.",  bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "title_legend",    slot: "title", category: "cosmetic", label: "The Legendary",  value: "The Legendary",  rarity: "legendary", icon: (c) => <IconTitle size={20} color={W(c,"#C9A227")} />, desc: "There are no others like you.",bonuses: { xpPct: 0.20, goldFlat: 3 } },
+  { id: "title_eternal2",  slot: "title", category: "cosmetic", label: "Undying",        value: "Undying",        rarity: "legendary", icon: (c) => <IconTitle size={20} color={W(c,"#C9A227")} />, desc: "Death could not stop you.",    bonuses: { xpPct: 0.18, goldFlat: 3 } },
+  // ---- BADGES (12) ----
+  { id: "badge_shield",    slot: "badge", category: "cosmetic", label: "Iron Shield",    value: "shield",  rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#8A8578")} />, desc: "Standard-issue badge.",         bonuses: {}, futureStats: { defense: 2 } },
+  { id: "badge_target",    slot: "badge", category: "cosmetic", label: "Bullseye",       value: "target",  rarity: "common",    icon: (c) => <Target size={20} color={W(c,"#8A8578")} />,    desc: "Aim true.",                     bonuses: {} },
+  { id: "badge_trophy",    slot: "badge", category: "cosmetic", label: "Bronze Trophy",  value: "trophy",  rarity: "common",    icon: (c) => <Trophy size={20} color={W(c,"#8A8578")} />,    desc: "A first taste of glory.",       bonuses: {} },
+  { id: "badge_sword",     slot: "badge", category: "cosmetic", label: "Crossed Swords", value: "swords",  rarity: "common",    icon: (c) => <Sword size={20} color={W(c,"#8A8578")} />,     desc: "Ready for battle.",             bonuses: {} },
+  { id: "badge_star",      slot: "badge", category: "cosmetic", label: "Gold Star",      value: "star",    rarity: "rare",      icon: (c) => <IconStar size={20} color={W(c,"#4FA3C9")} />,  desc: "Awarded to the dedicated.",     bonuses: { goldFlat: 1 } },
+  { id: "badge_dragon",    slot: "badge", category: "cosmetic", label: "Dragon Mark",    value: "dragon",  rarity: "rare",      icon: (c) => <IconDragon size={20} color={W(c,"#4FA3C9")} />,desc: "For those who face big quests.",bonuses: { xpPct: 0.05 } },
+  { id: "badge_flame",     slot: "badge", category: "cosmetic", label: "Flame Mark",     value: "flame",   rarity: "rare",      icon: (c) => <Flame size={20} color={W(c,"#C1652B")} />,     desc: "Burns brighter each day.",      bonuses: { xpPct: 0.05 } },
+  { id: "badge_lightning",  slot: "badge", category: "cosmetic", label: "Lightning Bolt", value: "bolt",    rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4FA3C9")} />, desc: "Speed and power combined.",     bonuses: { xpPct: 0.05 } },
+  { id: "badge_anchor",    slot: "badge", category: "cosmetic", label: "Anchor",         value: "anchor",  rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#4FA3C9")} />,desc: "Holds firm against the tide.",  bonuses: { goldFlat: 1 } },
+  { id: "badge_skull",     slot: "badge", category: "cosmetic", label: "Death Mark",     value: "skull",   rarity: "epic",      icon: (c) => <IconSkull size={20} color={W(c,"#8A5FBF")} />, desc: "You have defeated much.",       bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { critChance: 0.05 } },
+  { id: "badge_voideye",   slot: "badge", category: "cosmetic", label: "Void Eye",       value: "voidye",  rarity: "epic",      icon: (c) => <Target size={20} color={W(c,"#8A5FBF")} />,   desc: "Sees all, misses nothing.",     bonuses: { xpPct: 0.10 } },
+  { id: "badge_phoenix",   slot: "badge", category: "cosmetic", label: "Phoenix",        value: "phoenix", rarity: "epic",      icon: (c) => <Flame size={20} color={W(c,"#C9A227")} fill={W(c,"#C9A22744")} />, desc: "Rise from any failure.", bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "badge_crown",     slot: "badge", category: "cosmetic", label: "Crown",          value: "crown",   rarity: "legendary", icon: (c) => <IconCrown size={20} color={W(c,"#C9A227")} />, desc: "Worn only by the best.",        bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  { id: "badge_celestial", slot: "badge", category: "cosmetic", label: "Celestial Eye",  value: "ceye",    rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#C9A227")} />,  desc: "Watches from beyond the stars.",bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  // ---- AURA (10) ----
+  { id: "aura_none",       slot: "aura",  category: "cosmetic", label: "No Aura",        value: null,       rarity: "common",    icon: (c) => <Sparkles size={20} color={W(c,"#8A8578")} />, desc: "Plain and simple.",             bonuses: {} },
+  { id: "aura_silver",     slot: "aura",  category: "cosmetic", label: "Silver",         value: "Silver",   rarity: "common",    icon: (c) => <Sparkles size={20} color={W(c,"#B8C4CE")} />, desc: "A faint silver shimmer.",       bonuses: {} },
+  { id: "aura_ember2",     slot: "aura",  category: "cosmetic", label: "Blazing",        value: "Blazing",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#C1652B")} />, desc: "Your XP burns hotter.",         bonuses: { xpPct: 0.05 } },
+  { id: "aura_frost2",     slot: "aura",  category: "cosmetic", label: "Frozen",         value: "Frozen",   rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4FA3C9")} />, desc: "Cool precision.",               bonuses: { goldFlat: 1 } },
+  { id: "aura_verdant",    slot: "aura",  category: "cosmetic", label: "Verdant",        value: "Verdant",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4C9A6A")} />, desc: "Life pulses around you.",       bonuses: { goldFlat: 1 } },
+  { id: "aura_storm2",     slot: "aura",  category: "cosmetic", label: "Storm",          value: "Storm",    rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#7A9ABF")} />, desc: "Crackling with energy.",        bonuses: { xpPct: 0.05 } },
+  { id: "aura_arcane2",    slot: "aura",  category: "cosmetic", label: "Arcane",         value: "Arcane",   rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#8A5FBF")} />, desc: "Arcane energy radiates from you.",bonuses: { xpPct: 0.10 } },
+  { id: "aura_void2",      slot: "aura",  category: "cosmetic", label: "Void",           value: "Void",     rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#2A1F3D")} />, desc: "The void swirls around you.",   bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "aura_blood",      slot: "aura",  category: "cosmetic", label: "Blood",          value: "Blood",    rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#B33A3A")} />, desc: "Crimson mist trails you.",      bonuses: { xpPct: 0.08, goldFlat: 1 } },
+  { id: "aura_divine",     slot: "aura",  category: "cosmetic", label: "Divine",         value: "Divine",   rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#C9A227")} />, desc: "Blessed by the gods.",          bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  { id: "aura_celestial2", slot: "aura",  category: "cosmetic", label: "Celestial",      value: "Celestial",rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#E8D4A0")} />, desc: "Forged from starlight itself.", bonuses: { xpPct: 0.15, goldFlat: 2 } },
+
+  // ===== GEAR =====
+  // ---- WEAPONS (14) ----
+  { id: "wpn_sword",       slot: "weapon", category: "gear", label: "Iron Sword",      value: "sword",    rarity: "common",    icon: (c) => <Sword size={20} color={W(c,"#8A8578")} />,      desc: "The classic blade.",              bonuses: {} },
+  { id: "wpn_dagger",      slot: "weapon", category: "gear", label: "Shadow Dagger",   value: "dagger",   rarity: "common",    icon: (c) => <Sword size={20} color={W(c,"#8A8578")} />,      desc: "Swift and silent.",               bonuses: { goldFlat: 1 } },
+  { id: "wpn_club",        slot: "weapon", category: "gear", label: "Iron Club",       value: "club",     rarity: "common",    icon: (c) => <IconAxe size={20} color={W(c,"#8A8578")} />,    desc: "Blunt but effective.",            bonuses: {} },
+  { id: "wpn_spear",       slot: "weapon", category: "gear", label: "Hunting Spear",   value: "spear",    rarity: "common",    icon: (c) => <Sword size={20} color={W(c,"#8A8578")} />,      desc: "Reach and precision.",            bonuses: {} },
+  { id: "wpn_axe",         slot: "weapon", category: "gear", label: "Battle Axe",      value: "axe",      rarity: "rare",      icon: (c) => <IconAxe size={20} color={W(c,"#4FA3C9")} />,    desc: "Heavy and decisive.",             bonuses: { xpPct: 0.05 } },
+  { id: "wpn_maul",        slot: "weapon", category: "gear", label: "Iron Maul",       value: "maul",     rarity: "rare",      icon: (c) => <IconAxe size={20} color={W(c,"#4FA3C9")} />,    desc: "Slow but devastating.",           bonuses: { xpPct: 0.07 } },
+  { id: "wpn_crossbow",    slot: "weapon", category: "gear", label: "Crossbow",        value: "cross",    rarity: "rare",      icon: (c) => <Sword size={20} color={W(c,"#4FA3C9")} />,      desc: "Strike from a distance.",         bonuses: { goldFlat: 1 } },
+  { id: "wpn_frostblade",  slot: "weapon", category: "gear", label: "Frost Blade",     value: "frost",    rarity: "epic",      icon: (c) => <Sword size={20} color={W(c,"#4FA3C9")} />,      desc: "Cold and precise.",               bonuses: { xpPct: 0.10, goldFlat: 1 } },
+  { id: "wpn_voidblade",   slot: "weapon", category: "gear", label: "Void Blade",      value: "void",     rarity: "epic",      icon: (c) => <Sword size={20} color={W(c,"#5A4F7A")} />,      desc: "Darkness infused.",               bonuses: { xpPct: 0.10 } },
+  { id: "wpn_staff",       slot: "weapon", category: "gear", label: "Arcane Staff",    value: "staff",    rarity: "epic",      icon: (c) => <IconStaff size={20} color={W(c,"#8A5FBF")} />,  desc: "Channels pure focus energy.",     bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "wpn_lance",       slot: "weapon", category: "gear", label: "Dawn Lance",      value: "lance",    rarity: "epic",      icon: (c) => <Sword size={20} color={W(c,"#C9A227")} />,      desc: "Pierces through hesitation.",     bonuses: { xpPct: 0.10, goldFlat: 2 } },
+  { id: "wpn_stormhammer", slot: "weapon", category: "gear", label: "Storm Hammer",    value: "storm",    rarity: "epic",      icon: (c) => <IconAxe size={20} color={W(c,"#7A9ABF")} />,    desc: "Thunder in every swing.",         bonuses: { xpPct: 0.12, goldFlat: 1 } },
+  { id: "wpn_scythe",      slot: "weapon", category: "gear", label: "Reaper Scythe",   value: "scythe",   rarity: "legendary", icon: (c) => <IconScythe size={20} color={W(c,"#C9A227")} />,  desc: "The weapon of legends.",          bonuses: { xpPct: 0.20, goldFlat: 3 } },
+  { id: "wpn_celestialswd",slot: "weapon", category: "gear", label: "Celestial Sword", value: "celswrd",  rarity: "legendary", icon: (c) => <Sword size={20} color={W(c,"#E8A020")} />,      desc: "Forged from a falling star.",     bonuses: { xpPct: 0.20, goldFlat: 3 } },
+  // ---- ARMOUR (10) ----
+  { id: "arm_rags",        slot: "armour", category: "gear", label: "Worn Rags",       value: "rags",     rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#8A8578")} />, desc: "Better than nothing.",            bonuses: {}, futureStats: { defense: 1, maxHealth: 8 } },
+  { id: "arm_leather",     slot: "armour", category: "gear", label: "Leather Vest",    value: "leather",  rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#8A6540")} />, desc: "Light and flexible.",             bonuses: {}, futureStats: { defense: 2, maxHealth: 12 } },
+  { id: "arm_studded",     slot: "armour", category: "gear", label: "Studded Leather", value: "studded",  rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#7A6050")} />, desc: "Reinforced at the joints.",       bonuses: {}, futureStats: { defense: 3, maxHealth: 15 } },
+  { id: "arm_chain",       slot: "armour", category: "gear", label: "Chainmail",       value: "chain",    rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#4FA3C9")} />, desc: "Proven in many battles.",         bonuses: { goldFlat: 1 }, futureStats: { defense: 5, maxHealth: 20 } },
+  { id: "arm_scale",       slot: "armour", category: "gear", label: "Scale Armour",    value: "scale",    rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#5A8A7A")} />, desc: "Dragon-scale inspired.",          bonuses: { xpPct: 0.05 }, futureStats: { defense: 6, maxHealth: 25 } },
+  { id: "arm_brigandine",  slot: "armour", category: "gear", label: "Brigandine",      value: "brig",     rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#7A9ABF")} />, desc: "Versatile and sturdy.",           bonuses: { goldFlat: 1 }, futureStats: { defense: 5, maxHealth: 22 } },
+  { id: "arm_plate",       slot: "armour", category: "gear", label: "Plate Armour",    value: "plate",    rarity: "epic",      icon: (c) => <IconShield size={20} color={W(c,"#8A5FBF")} />, desc: "Near impenetrable.",              bonuses: { xpPct: 0.08 }, futureStats: { defense: 9, maxHealth: 35 } },
+  { id: "arm_runic",       slot: "armour", category: "gear", label: "Runic Plate",     value: "runic",    rarity: "epic",      icon: (c) => <IconShield size={20} color={W(c,"#4FA3C9")} />, desc: "Etched with ancient runes.",      bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 10, maxHealth: 38 } },
+  { id: "arm_shadow",      slot: "armour", category: "gear", label: "Shadow Shroud",   value: "shadow",   rarity: "epic",      icon: (c) => <IconShield size={20} color={W(c,"#2A1F3D")} />, desc: "Woven from darkness itself.",     bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 8, maxHealth: 28 } },
+  { id: "arm_voidweave",   slot: "armour", category: "gear", label: "Voidweave",       value: "voidwv",   rarity: "legendary", icon: (c) => <IconShield size={20} color={W(c,"#5A4F7A")} />, desc: "Threads pulled from the void.",   bonuses: { xpPct: 0.15, goldFlat: 2 }, futureStats: { defense: 12, maxHealth: 45 } },
+  { id: "arm_celestial",   slot: "armour", category: "gear", label: "Celestial Mail",  value: "celmail",  rarity: "legendary", icon: (c) => <IconShield size={20} color={W(c,"#C9A227")} />, desc: "Forged in starlight.",            bonuses: { xpPct: 0.15, goldFlat: 2 }, futureStats: { defense: 14, maxHealth: 55 } },
+  // ---- SHIELDS (10) ----
+  { id: "shd_plank",       slot: "shield", category: "gear", label: "Wooden Plank",    value: "plank",    rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#8A6540")} />, desc: "Surprisingly effective.",         bonuses: {}, futureStats: { defense: 1, blockChance: 0.04 } },
+  { id: "shd_buckler",     slot: "shield", category: "gear", label: "Buckler",         value: "buckler",  rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#8A8578")} />, desc: "Small but dependable.",           bonuses: {}, futureStats: { defense: 1, blockChance: 0.06 } },
+  { id: "shd_heater",      slot: "shield", category: "gear", label: "Heater Shield",   value: "heater",   rarity: "common",    icon: (c) => <IconShield size={20} color={W(c,"#7A6050")} />, desc: "Traditional knight's shield.",    bonuses: {}, futureStats: { defense: 2, blockChance: 0.07 } },
+  { id: "shd_kite",        slot: "shield", category: "gear", label: "Kite Shield",     value: "kite",     rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#4FA3C9")} />, desc: "Covers more ground.",             bonuses: { goldFlat: 1 }, futureStats: { defense: 3, blockChance: 0.11 } },
+  { id: "shd_rune",        slot: "shield", category: "gear", label: "Rune Shield",     value: "rune",     rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#4FA3C9")} />, desc: "Ancient runes hum with power.",   bonuses: { xpPct: 0.05 }, futureStats: { defense: 3, blockChance: 0.13 } },
+  { id: "shd_dragon",      slot: "shield", category: "gear", label: "Dragon Scale",    value: "dragon",   rarity: "rare",      icon: (c) => <IconShield size={20} color={W(c,"#5A8A7A")} />, desc: "A scale from an ancient dragon.", bonuses: { goldFlat: 1 }, futureStats: { defense: 4, blockChance: 0.12 } },
+  { id: "shd_tower",       slot: "shield", category: "gear", label: "Tower Shield",    value: "tower",    rarity: "epic",      icon: (c) => <IconShield size={20} color={W(c,"#8A5FBF")} />, desc: "A wall of iron will.",            bonuses: { xpPct: 0.08 }, futureStats: { defense: 6, blockChance: 0.18 } },
+  { id: "shd_stormwall",   slot: "shield", category: "gear", label: "Storm Wall",      value: "storm",    rarity: "epic",      icon: (c) => <IconShield size={20} color={W(c,"#7A9ABF")} />, desc: "Deflects even lightning.",        bonuses: { xpPct: 0.08, goldFlat: 1 }, futureStats: { defense: 6, blockChance: 0.20 } },
+  { id: "shd_voidwall",    slot: "shield", category: "gear", label: "Void Wall",       value: "voidwl",   rarity: "epic",      icon: (c) => <IconShield size={20} color={W(c,"#5A4F7A")} />, desc: "Absorbs darkness.",               bonuses: { xpPct: 0.10, goldFlat: 1 }, futureStats: { defense: 5, blockChance: 0.20 } },
+  { id: "shd_aegis",       slot: "shield", category: "gear", label: "Aegis",           value: "aegis",    rarity: "legendary", icon: (c) => <IconShield size={20} color={W(c,"#C9A227")} />, desc: "The shield of legends.",          bonuses: { xpPct: 0.12, goldFlat: 2 }, futureStats: { defense: 8, blockChance: 0.28 } },
+  { id: "shd_celestial",   slot: "shield", category: "gear", label: "Celestial Barrier",value:"celbar",   rarity: "legendary", icon: (c) => <IconShield size={20} color={W(c,"#E8A020")} />, desc: "Blessed by the stars.",           bonuses: { xpPct: 0.12, goldFlat: 2 }, futureStats: { defense: 8, blockChance: 0.26 } },
 ];
 
-// ---- SET BONUSES ----
+// ---- SET BONUSES (12) — each item belongs to exactly one set ----
 const SETS = [
-  {
-    id: "shadow_set",
-    label: "Shadow Set",
-    color: "#8A5FBF",
-    items: ["wpn_scythe", "badge_skull", "title_shadow", "arm_shadow"],
-    requiredCount: 3,
-    bonus: { xpPct: 0.25, goldFlat: 0 },
-    desc: "+25% XP on all quests",
-  },
-  {
-    id: "dawn_set",
-    label: "Dawn Set",
-    color: "#C9A227",
-    items: ["wpn_sword", "badge_shield", "title_keeper", "arm_leather"],
-    requiredCount: 3,
-    bonus: { xpPct: 0, goldFlat: 2 },
-    desc: "+2 gold per quest",
-  },
-  {
-    id: "arcane_set",
-    label: "Arcane Set",
-    color: "#4FA3C9",
-    items: ["wpn_staff", "badge_dragon", "title_archmage", "arm_chain", "shd_kite"],
-    requiredCount: 3,
-    bonus: { xpPct: 0.20, goldFlat: 1 },
-    desc: "+20% XP and +1 gold",
-  },
-  {
-    id: "celestial_set",
-    label: "Celestial Set",
-    color: "#E8A020",
-    items: ["arm_celestial", "shd_aegis", "wpn_lance", "aura_divine", "theme_solaris"],
-    requiredCount: 4,
-    bonus: { xpPct: 0.30, goldFlat: 3 },
-    desc: "+30% XP and +3 gold",
-  },
-  {
-    id: "reaper_set",
-    label: "Reaper Set",
-    color: "#B33A3A",
-    items: ["wpn_scythe", "badge_skull", "title_legend", "theme_blood", "aura_arcane"],
-    requiredCount: 3,
-    bonus: { xpPct: 0.20, goldFlat: 2 },
-    desc: "+20% XP and +2 gold",
-  },
+  // Gear sets (weapon + armour + shield combos)
+  { id: "dawn_set",      label: "Dawn Set",        color: "#C9A227",
+    items: ["wpn_sword","wpn_dagger","arm_leather","arm_studded","shd_buckler"],
+    requiredCount: 3, bonus: { xpPct: 0.0, goldFlat: 2 }, desc: "+2 gold/quest" },
+
+  { id: "arcane_set",    label: "Arcane Set",      color: "#4FA3C9",
+    items: ["wpn_staff","arm_chain","shd_kite","arm_scale","wpn_club"],
+    requiredCount: 3, bonus: { xpPct: 0.20, goldFlat: 1 }, desc: "+20% XP, +1 gold" },
+
+  { id: "shadow_set",    label: "Shadow Set",      color: "#8A5FBF",
+    items: ["wpn_voidblade","arm_shadow","shd_voidwall","arm_voidweave","wpn_scythe"],
+    requiredCount: 3, bonus: { xpPct: 0.25, goldFlat: 0 }, desc: "+25% XP" },
+
+  { id: "frost_set",     label: "Frost Set",       color: "#4FA3C9",
+    items: ["wpn_frostblade","shd_dragon","arm_brigandine","theme_frost","aura_frost2"],
+    requiredCount: 3, bonus: { xpPct: 0.15, goldFlat: 1 }, desc: "+15% XP, +1 gold" },
+
+  { id: "storm_set",     label: "Storm Set",       color: "#7A9ABF",
+    items: ["wpn_stormhammer","shd_stormwall","arm_plate","wpn_maul","shd_tower"],
+    requiredCount: 3, bonus: { xpPct: 0.18, goldFlat: 2 }, desc: "+18% XP, +2 gold" },
+
+  { id: "runic_set",     label: "Runic Set",       color: "#8A5FBF",
+    items: ["arm_runic","shd_rune","wpn_lance","wpn_axe","wpn_spear"],
+    requiredCount: 3, bonus: { xpPct: 0.22, goldFlat: 1 }, desc: "+22% XP, +1 gold" },
+
+  { id: "celestial_set", label: "Celestial Set",   color: "#E8A020",
+    items: ["wpn_celestialswd","arm_celestial","shd_aegis","shd_celestial","shd_plank"],
+    requiredCount: 4, bonus: { xpPct: 0.30, goldFlat: 3 }, desc: "+30% XP, +3 gold" },
+
+  // Cosmetic + mixed sets
+  { id: "reaper_set",    label: "Reaper Set",      color: "#B33A3A",
+    items: ["title_shadow","badge_skull","theme_blood","aura_blood","title_bloodknight"],
+    requiredCount: 3, bonus: { xpPct: 0.20, goldFlat: 2 }, desc: "+20% XP, +2 gold" },
+
+  { id: "void_set",      label: "Void Set",        color: "#5A4F7A",
+    items: ["title_voidwalk","theme_void","aura_void2","badge_voideye","theme_abyss"],
+    requiredCount: 3, bonus: { xpPct: 0.22, goldFlat: 1 }, desc: "+22% XP, +1 gold" },
+
+  { id: "nebula_set",    label: "Nebula Set",      color: "#7A4FA8",
+    items: ["theme_nebula","aura_celestial2","badge_celestial","title_starforged","badge_star"],
+    requiredCount: 4, bonus: { xpPct: 0.28, goldFlat: 2 }, desc: "+28% XP, +2 gold" },
+
+  { id: "undying_set",   label: "Undying Set",     color: "#C9A227",
+    items: ["title_eternal2","badge_phoenix","aura_divine","badge_crown","title_legend"],
+    requiredCount: 4, bonus: { xpPct: 0.35, goldFlat: 4 }, desc: "+35% XP, +4 gold" },
+
+  { id: "bloom_set",     label: "Bloom Set",       color: "#4C9A6A",
+    items: ["theme_verdant","aura_verdant","badge_flame","title_eternal","theme_ember"],
+    requiredCount: 3, bonus: { xpPct: 0.12, goldFlat: 1 }, desc: "+12% XP, +1 gold" },
 ];
 
 function computeActiveStats(equipped) {
-  // Sum bonuses from all equipped items
-  let xpPct = 0, goldFlat = 0;
-  // Future stats stubbed — not used in gameplay yet
-  let defense = 0, maxHealth = 100, blockChance = 0, critChance = 0;
-
+  let xpPct = 0, goldFlat = 0, defense = 0, maxHealth = 100, blockChance = 0, critChance = 0;
   Object.values(equipped).forEach((itemId) => {
     if (!itemId) return;
     const item = ITEM_CATALOGUE.find((i) => i.id === itemId);
@@ -262,8 +431,6 @@ function computeActiveStats(equipped) {
     blockChance += item.futureStats?.blockChance || 0;
     critChance += item.futureStats?.critChance || 0;
   });
-
-  // Check active sets
   const activeSets = [];
   SETS.forEach((set) => {
     const equippedIds = Object.values(equipped).filter(Boolean);
@@ -274,19 +441,20 @@ function computeActiveStats(equipped) {
       goldFlat += set.bonus.goldFlat;
     }
   });
-
   return { xpPct, goldFlat, defense, maxHealth, blockChance, critChance, activeSets };
 }
 
 const CRATE_TIERS = [
-  { id: "wooden", label: "Wooden Crate", icon: (c) => <span style={{ fontSize: 22 }}>📦</span>, cost: 15,  color: "#8A6540", weights: { common: 70, rare: 25, epic: 4,  legendary: 1 } },
-  { id: "iron",   label: "Iron Crate",   icon: (c) => <IconShield size={22} color="#7A8A9A" />, cost: 40,  color: "#7A8A9A", weights: { common: 40, rare: 45, epic: 13, legendary: 2 } },
-  { id: "golden", label: "Golden Crate", icon: (c) => <Trophy size={22} color="#C9A227" />,     cost: 100, color: "#C9A227", weights: { common: 10, rare: 40, epic: 40, legendary: 10 } },
+  { id: "wooden", label: "Wooden Crate", icon: () => <span style={{ fontSize: 22 }}>📦</span>, cost: 15,  color: "#8A6540", weights: { common: 70, rare: 25, epic: 4,  legendary: 1 } },
+  { id: "iron",   label: "Iron Crate",   icon: () => <IconShield size={22} color="#7A8A9A" />,  cost: 40,  color: "#7A8A9A", weights: { common: 40, rare: 45, epic: 13, legendary: 2 } },
+  { id: "golden", label: "Golden Crate", icon: () => <Trophy size={22} color="#C9A227" />,      cost: 100, color: "#C9A227", weights: { common: 10, rare: 40, epic: 40, legendary: 10 } },
 ];
 
-const SLOTS = ["weapon", "armour", "shield", "badge", "title", "theme", "aura"];
-const SLOT_LABELS = { weapon: "Weapon", armour: "Armour", shield: "Shield", badge: "Badge", title: "Title", theme: "Theme", aura: "Aura" };
-const DEFAULT_GEAR = { theme: "theme_ember", title: null, badge: null, weapon: "wpn_sword", armour: null, shield: null, aura: "aura_none" };
+const GEAR_SLOTS     = ["weapon", "armour", "shield"];
+const COSMETIC_SLOTS = ["badge", "title", "theme", "aura"];
+const SLOTS          = [...GEAR_SLOTS, ...COSMETIC_SLOTS];
+const SLOT_LABELS    = { weapon: "Weapon", armour: "Armour", shield: "Shield", badge: "Badge", title: "Title", theme: "Theme", aura: "Aura" };
+const DEFAULT_GEAR   = { theme: "theme_ember", title: null, badge: null, weapon: "wpn_sword", armour: null, shield: null, aura: "aura_none" };
 
 function rollCrate(tier, inventory, pityCount) {
   let weights = { ...tier.weights };
@@ -301,6 +469,39 @@ function rollCrate(tier, inventory, pityCount) {
   const unowned = pool.filter((i) => !inventory.includes(i.id));
   const finalPool = unowned.length > 0 ? unowned : pool;
   return finalPool[Math.floor(Math.random() * finalPool.length)];
+}
+
+// ---- Combat System ----
+const WEAPON_ATK = {
+  wpn_sword: 8, wpn_dagger: 10, wpn_club: 7, wpn_spear: 9,
+  wpn_axe: 12, wpn_maul: 15, wpn_crossbow: 11,
+  wpn_frostblade: 13, wpn_voidblade: 14, wpn_staff: 11,
+  wpn_lance: 13, wpn_stormhammer: 16, wpn_scythe: 18, wpn_celestialswd: 20,
+};
+const ENEMY_STATS = {
+  trivial: { hp: 20,  atk: 4,  reward: 1,  xp: 2  },
+  easy:    { hp: 40,  atk: 7,  reward: 2,  xp: 5  },
+  medium:  { hp: 80,  atk: 12, reward: 4,  xp: 10 },
+  hard:    { hp: 150, atk: 18, reward: 8,  xp: 20 },
+  epic:    { hp: 220, atk: 24, reward: 15, xp: 35 },
+};
+function buildEnemies(completedQuests, bossId) {
+  const normals = completedQuests
+    .filter((q) => q.id !== bossId)
+    .map((q) => {
+      const stats = ENEMY_STATS[q.difficulty] || ENEMY_STATS.medium;
+      // ±20% HP variance for variety
+      const variance = 0.8 + Math.random() * 0.4;
+      const hp = Math.round(stats.hp * variance);
+      return { id: q.id, name: q.title, difficulty: q.difficulty, maxHp: hp, hp, atk: stats.atk, reward: stats.reward, xpReward: stats.xp, isBoss: false, dropChance: 0.05 };
+    });
+  const boss = completedQuests.find((q) => q.id === bossId);
+  if (boss) {
+    const stats = ENEMY_STATS[boss.difficulty] || ENEMY_STATS.epic;
+    const bossHp = Math.round(stats.hp * 2 * (0.9 + Math.random() * 0.2));
+    normals.push({ id: boss.id, name: boss.title, difficulty: boss.difficulty, maxHp: bossHp, hp: bossHp, atk: Math.round(stats.atk * 1.25), reward: stats.reward * 3, xpReward: stats.xp * 2, isBoss: true, dropChance: boss.difficulty === "epic" ? 1.0 : 0.6 });
+  }
+  return normals;
 }
 
 const STORAGE_KEY = "quest-log-data";
@@ -496,11 +697,17 @@ export default function App() {
   const [lastActiveDate, setLastActiveDate] = useState(null);
   const [weeklyBossId, setWeeklyBossId] = useState(null);
   const [weekStart, setWeekStart] = useState(getMondayISO());
+  const [pendingBattle, setPendingBattle] = useState(null); // enemies array waiting to be fought
+  const [battleState, setBattleState] = useState(null); // active battle
+  const [isBlocking, setIsBlocking] = useState(false);
+  const [battleAnimating, setBattleAnimating] = useState(false);
+  const [blockCooldown, setBlockCooldown] = useState(0); // turns until block available again
   const [inventory, setInventory] = useState(["theme_ember", "wpn_sword"]);
   const [equipped, setEquipped] = useState({ ...DEFAULT_GEAR });
   const [pityCount, setPityCount] = useState(0);
   const [crateModalOpen, setCrateModalOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [pickingSlot, setPickingSlot] = useState(null); // which slot is being picked
   const [lastDrop, setLastDrop] = useState(null);
   const [devMode, setDevMode] = useState(false);
   const [devGold, setDevGold] = useState("100");
@@ -602,6 +809,17 @@ export default function App() {
         setLastActiveDate(data.lastActiveDate || null);
         setWeekStart(data.weekStart === nowMonday ? data.weekStart : nowMonday);
         setWeeklyBossId(data.weekStart === nowMonday ? (data.weeklyBossId || null) : null);
+        // On new week: generate battle from last week's completed quests
+        if (data.weekStart && data.weekStart !== nowMonday) {
+          const completed = (data.quests || []).filter((q) => q.completed && !q.recurring);
+          if (completed.length > 0) {
+            const enemies = buildEnemies(completed, data.weeklyBossId);
+            setPendingBattle(enemies);
+          }
+        } else {
+          setPendingBattle(data.pendingBattle || null);
+          setBattleState(data.battleState || null);
+        }
         setInventory(data.inventory?.length ? data.inventory : ["theme_ember", "wpn_sword"]);
         setEquipped(data.equipped ? { ...DEFAULT_GEAR, ...data.equipped } : { ...DEFAULT_GEAR });
         setPityCount(data.pityCount || 0);
@@ -627,11 +845,11 @@ export default function App() {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
           quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, pityCount, historyDay, historyDiff,
-          habits, habitPerfectDayDate, calView,
+          habits, habitPerfectDayDate, calView, pendingBattle, battleState,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, pityCount, historyDay, historyDiff, habits, habitPerfectDayDate, calView, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, pityCount, historyDay, historyDiff, habits, habitPerfectDayDate, calView, pendingBattle, battleState, loaded]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -662,6 +880,7 @@ export default function App() {
         setInventory(data.inventory?.length ? data.inventory : ["theme_ember", "wpn_sword"]);
         setEquipped(data.equipped ? { ...DEFAULT_GEAR, ...data.equipped } : { ...DEFAULT_GEAR });
         setPityCount(data.pityCount || 0);
+        setPendingBattle(data.pendingBattle || null);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
         setHistoryDay({ ...emptyDayCounts(), ...(data.historyDay || {}) });
@@ -1016,6 +1235,8 @@ export default function App() {
     setEquipped({ ...DEFAULT_GEAR });
     setPityCount(0);
     setLastDrop(null);
+    setPendingBattle(null);
+    setBattleState(null);
     setHabits([
       { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
       { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
@@ -1040,10 +1261,193 @@ export default function App() {
     setTimeout(() => setConfettiPieces([]), 2000);
   }
 
+  function getPlayerCombatStats() {
+    const atk = WEAPON_ATK[equipped.weapon] || 15;
+    const def = activeStats.defense;
+    const hp = activeStats.maxHealth;
+    const crit = activeStats.critChance;
+    return { atk, def, hp, crit };
+  }
+
+  function startBattle() {
+    if (!pendingBattle || pendingBattle.length === 0) return;
+    const stats = getPlayerCombatStats();
+    setBattleState({
+      enemies: pendingBattle.map((e) => ({ ...e })),
+      currentIndex: 0,
+      playerMaxHp: stats.hp,
+      playerHp: stats.hp,
+      log: [`⚔ Battle begins! ${pendingBattle.length} enemies await.`, `Your weapon: ${ITEM_CATALOGUE.find((i) => i.id === equipped.weapon)?.label || "Iron Sword"} — ${stats.atk} ATK`],
+      phase: "fighting", // "fighting" | "victory" | "defeat" | "drop"
+      goldEarned: 0,
+      xpEarned: 0,
+      pendingDrop: null,
+    });
+  }
+
+  function doPlayerTurn(blocking = false) {
+    if (!battleState || battleState.phase !== "fighting" || battleAnimating) return;
+    setBattleAnimating(true);
+    setIsBlocking(blocking);
+    if (blocking) setBlockCooldown(2); // 2-turn cooldown after blocking
+    else setBlockCooldown((c) => Math.max(0, c - 1));
+    const stats = getPlayerCombatStats();
+    const state = battleState;
+    const enemies = state.enemies.map((e) => ({ ...e }));
+    const enemy = enemies[state.currentIndex];
+    if (!enemy || enemy.hp <= 0) { setBattleAnimating(false); return; }
+    const log = [...state.log];
+
+    // Step 1: Player attack (always attacks, blocking reduces damage received not dealt)
+    setTimeout(() => {
+      const isCrit = Math.random() < stats.crit;
+      const variance = Math.floor(Math.random() * Math.ceil(stats.atk * 0.3));
+      // Blocking = 70% damage dealt (fighting defensively)
+      const attackMult = blocking ? 0.7 : 1;
+      const rawDmg = Math.floor((stats.atk + variance) * attackMult);
+      const playerDmg = isCrit ? rawDmg * 2 : rawDmg;
+      const enemyHp = Math.max(0, enemy.hp - playerDmg);
+      enemies[state.currentIndex] = { ...enemy, hp: enemyHp };
+      log.push(`${isCrit ? "💥 CRIT! " : "⚔ "}You deal ${playerDmg}${blocking ? " (guarded)" : ""} to ${enemy.name}. (${enemyHp}/${enemy.maxHp} HP)`);
+      setBattleState((prev) => prev ? { ...prev, enemies: enemies.map(e => ({...e})), log: [...log] } : prev);
+
+      // Step 2: Enemy death check
+      setTimeout(() => {
+        if (enemyHp <= 0) {
+          log.push(`💀 ${enemy.name} defeated! +${enemy.reward}g +${enemy.xpReward}XP`);
+          setGold((g) => g + enemy.reward);
+          setTotalXP((x) => x + enemy.xpReward);
+          let pendingDrop = null;
+          if (Math.random() < enemy.dropChance) {
+            const weights = enemy.isBoss && enemy.difficulty === "epic"
+              ? { common: 0, rare: 30, epic: 50, legendary: 20 }
+              : enemy.isBoss ? { common: 20, rare: 60, epic: 18, legendary: 2 }
+              : { common: 100, rare: 0, epic: 0, legendary: 0 };
+            const drop = rollCrate({ weights }, inventory, 0);
+            const isNew = !inventory.includes(drop.id);
+            if (isNew) setInventory((inv) => [...inv, drop.id]);
+            pendingDrop = { item: drop, isNew };
+            log.push(`🎁 ${enemy.isBoss ? "Boss drop!" : "Lucky drop!"} ${drop.label}!`);
+          }
+          const nextIndex = state.currentIndex + 1;
+          const allDone = nextIndex >= enemies.length;
+          // Partial heal between fights — 20% of max HP on kill
+          const healOnKill = !allDone ? Math.floor(state.playerMaxHp * 0.20) : 0;
+          if (healOnKill > 0) log.push(`💊 Recovered ${healOnKill} HP.`);
+          setBattleState((prev) => prev ? {
+            ...prev, enemies: enemies.map(e=>({...e})), log: [...log],
+            currentIndex: nextIndex,
+            playerHp: Math.min(prev.playerMaxHp, prev.playerHp + healOnKill),
+            goldEarned: prev.goldEarned + enemy.reward,
+            xpEarned: prev.xpEarned + enemy.xpReward,
+            pendingDrop: pendingDrop || null,
+            phase: pendingDrop ? "drop" : allDone ? "victory" : "fighting",
+          } : prev);
+          if (allDone && !pendingDrop) setPendingBattle(null);
+          setBattleAnimating(false);
+          return;
+        }
+
+        // Step 3: Enemy counter-attack
+        setTimeout(() => {
+          const defPct = Math.min(0.50, activeStats.defense / 100);
+          // Enemy block: small flat chance, reduces damage 25% — not a cancel
+          const enemyBlockRoll = Math.random();
+          const enemyBlockChance = enemy.isBoss ? 0.12 : enemy.difficulty === "hard" ? 0.10 : enemy.difficulty === "medium" ? 0.06 : 0;
+          let newPlayerHp = state.playerHp;
+          const rawEnemyDmg = Math.max(1, Math.round(enemy.atk * (1 - defPct)) + Math.floor(Math.random() * 4) - 1);
+          // Blocking player: 40% damage reduction
+          const incomingMult = blocking ? 0.6 : 1;
+          // Counter-attack: shield's blockChance gives chance to riposte for 50% ATK
+          const counterRoll = Math.random();
+          const counterChance = activeStats.blockChance;
+          if (enemyBlockRoll < enemyBlockChance) {
+            const reducedDmg = Math.max(1, Math.round(rawEnemyDmg * 0.75 * incomingMult));
+            newPlayerHp = state.playerHp - reducedDmg;
+            log.push(`🛡 ${enemy.name} deflects — but still hits for ${reducedDmg}! (You: ${Math.max(0, newPlayerHp)}/${state.playerMaxHp} HP)`);
+          } else {
+            const finalDmg = Math.max(1, Math.round(rawEnemyDmg * incomingMult));
+            newPlayerHp = state.playerHp - finalDmg;
+            log.push(`${enemy.name} ${blocking ? "strikes your guard for" : "hits for"} ${finalDmg}! (You: ${Math.max(0, newPlayerHp)}/${state.playerMaxHp} HP)`);
+          }
+          // Counter-attack on block
+          if (blocking && counterRoll < counterChance) {
+            const counterDmg = Math.max(1, Math.floor(stats.atk * 0.5));
+            enemies[state.currentIndex] = { ...enemies[state.currentIndex], hp: Math.max(0, enemies[state.currentIndex].hp - counterDmg) };
+            log.push(`⚡ Counter! Your shield strikes back for ${counterDmg}!`);
+          }
+          if (newPlayerHp <= 0) {
+            log.push(`💔 Defeated by ${enemy.name}! Moving to next enemy...`);
+            const nextIndex = state.currentIndex + 1;
+            const allDone = nextIndex >= enemies.length;
+            setBattleState((prev) => {
+              if (!prev) return prev;
+              const healedHp = Math.min(prev.playerMaxHp, prev.playerMaxHp * 0.3 + (allDone ? 0 : 0));
+              const newLog = [...log, allDone ? "⚔ Battle over." : `💊 Recovered ${Math.floor(prev.playerMaxHp * 0.3)} HP before next fight.`];
+              return {
+                ...prev,
+                enemies: enemies.map(e=>({...e})),
+                log: newLog,
+                currentIndex: nextIndex,
+                // On defeat: restore 30% HP (not full) so it's still a consequence
+                playerHp: Math.min(prev.playerMaxHp, Math.floor(prev.playerMaxHp * 0.30)),
+                // Only victory if we actually won — defeat means phase = defeat if it was the last
+                phase: allDone ? "defeat" : "fighting",
+              };
+            });
+            if (allDone) setPendingBattle(null);
+          } else {
+            setBattleState((prev) => prev ? { ...prev, enemies: enemies.map(e=>({...e})), log: [...log], playerHp: newPlayerHp } : prev);
+          }
+          setBattleAnimating(false);
+          setIsBlocking(false);
+        }, 650);
+      }, 650);
+    }, 150);
+  }
+
+  function doBlock() {
+    if (!battleState || battleState.phase !== "fighting" || battleAnimating || blockCooldown > 0) return;
+    doPlayerTurn(true);
+  }
+
+  function claimDrop() {
+    if (!battleState?.pendingDrop) return;
+    const nextIndex = battleState.currentIndex;
+    const allDone = nextIndex >= battleState.enemies.length;
+    setBattleState({ ...battleState, pendingDrop: null, phase: allDone ? "victory" : "fighting" });
+    if (allDone) setPendingBattle(null);
+  }
+
+  function abandonBattle() {
+    setPendingBattle(null);
+    setBattleState(null);
+  }
+
+  function simulateBattle() {
+    const fakeQuests = [
+      { id: "sim1", title: "Goblin Scout", difficulty: "easy", completed: true },
+      { id: "sim2", title: "Skeleton Warrior", difficulty: "medium", completed: true },
+      { id: "sim3", title: "Dark Knight", difficulty: "hard", completed: true },
+      { id: "sim4", title: "Ancient Dragon", difficulty: "epic", completed: true },
+    ];
+    const enemies = buildEnemies(fakeQuests, "sim4");
+    setPendingBattle(enemies);
+    setBattleState(null);
+  }
+
   function equipItem(itemId) {
     const item = ITEM_CATALOGUE.find((i) => i.id === itemId);
     if (!item || !inventory.includes(itemId)) return;
     setEquipped((e) => ({ ...e, [item.slot]: itemId }));
+  }
+
+  function getItemSets(itemId) {
+    // Returns array of { set, ownedCount } for every set this item belongs to
+    return SETS.filter((s) => s.items.includes(itemId)).map((s) => ({
+      set: s,
+      ownedCount: s.items.filter((id) => inventory.includes(id)).length,
+    }));
   }
 
   function openCrate(tier) {
@@ -1307,6 +1711,164 @@ export default function App() {
         <div key={p.id} className="confetti-piece" style={{ left: p.left, top: 0, background: p.color, width: p.size, height: p.size, animationDuration: p.duration, animationDelay: p.delay }} />
       ))}
 
+      {/* ---- BATTLE PENDING BANNER ---- */}
+      {pendingBattle && !battleState && (
+        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 65, background: "linear-gradient(135deg, #8A2E44, #232E3D)", border: "1px solid #8A2E44", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 6px 24px rgba(0,0,0,0.5)", cursor: "pointer", whiteSpace: "nowrap" }} onClick={startBattle}>
+          <span style={{ fontSize: 20 }}>⚔</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>Weekly Battle Ready!</div>
+            <div style={{ fontSize: 10, color: "#8A8578" }}>{pendingBattle.length} enemies await — tap to fight</div>
+          </div>
+          <button onClick={(e) => { e.stopPropagation(); abandonBattle(); }} style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", fontSize: 16 }}>✕</button>
+        </div>
+      )}
+
+      {/* ---- BATTLE MODAL ---- */}
+      {battleState && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.95)", zIndex: 75, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+          <div style={{ background: "#1B2430", border: "1px solid #33414F", borderRadius: 16, width: "100%", maxWidth: 440, maxHeight: "94vh", display: "flex", flexDirection: "column" }}>
+
+            {/* Header — enemy counter */}
+            <div style={{ background: "#141C27", borderRadius: "16px 16px 0 0", padding: "10px 16px", borderBottom: "1px solid #33414F", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", fontFamily: "Georgia, serif" }}>
+                {battleState.phase === "victory" ? "⚔ Victory!" : battleState.phase === "defeat" ? "💔 Defeated" : battleState.phase === "drop" ? "🎁 Item Drop!" : "⚔ Weekly Battle"}
+              </span>
+              <span style={{ fontSize: 11, color: "#8A8578" }}>{Math.min(battleState.currentIndex, battleState.enemies.length)}/{battleState.enemies.length} defeated</span>
+            </div>
+
+            {/* Enemy visual arena */}
+            {battleState.phase === "fighting" && (() => {
+              const enemy = battleState.enemies[battleState.currentIndex];
+              if (!enemy) return null;
+              const diff = DIFFICULTIES.find((d) => d.key === enemy.difficulty);
+              const enemyColor = enemy.isBoss ? "#C9A227" : diff?.color || "#8A8578";
+              return (
+                <div style={{ background: "linear-gradient(180deg, #0D1117 0%, #1B2430 100%)", padding: "16px 16px 10px", flexShrink: 0 }}>
+                  {/* Enemy info + visual row */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                    {/* Enemy SVG */}
+                    <div style={{ flexShrink: 0 }}>
+                      {getEnemyVisual(enemy, 72)}
+                    </div>
+                    {/* Enemy stats */}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: enemyColor, marginBottom: 2 }}>
+                        {enemy.isBoss ? "👑 " : ""}{enemy.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#8A8578", marginBottom: 4 }}>
+                        {DIFFICULTIES.find((d) => d.key === enemy.difficulty)?.label} · ATK {enemy.atk}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#5C6773", marginBottom: 3 }}>
+                        <span>HP</span><span>{enemy.hp}/{enemy.maxHp}</span>
+                      </div>
+                      <div style={{ height: 7, background: "#232E3D", borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${(enemy.hp / enemy.maxHp) * 100}%`, background: enemyColor, borderRadius: 4, transition: "width 0.35s ease" }} />
+                      </div>
+                    </div>
+                  </div>
+                  {/* Player HP */}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#5C6773", marginBottom: 3 }}>
+                    <span>Your HP</span>
+                    <span>{battleState.playerHp}/{battleState.playerMaxHp} · ATK {getPlayerCombatStats().atk} · DEF {activeStats.defense}</span>
+                  </div>
+                  <div style={{ height: 6, background: "#232E3D", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${(battleState.playerHp / battleState.playerMaxHp) * 100}%`, background: battleState.playerHp / battleState.playerMaxHp > 0.5 ? "#4C9A6A" : battleState.playerHp / battleState.playerMaxHp > 0.25 ? "#C9A227" : "#8A2E44", borderRadius: 4, transition: "width 0.35s ease" }} />
+                  </div>
+                  {/* Enemy queue preview */}
+                  {battleState.enemies.length > 1 && (
+                    <div style={{ display: "flex", gap: 4, marginTop: 8, alignItems: "center" }}>
+                      <span style={{ fontSize: 9, color: "#5C6773", marginRight: 2 }}>Queue:</span>
+                      {battleState.enemies.map((e, i) => {
+                        const d = DIFFICULTIES.find((d) => d.key === e.difficulty);
+                        return (
+                          <div key={e.id} style={{ width: 18, height: 18, borderRadius: "50%", background: i < battleState.currentIndex ? "#2C3947" : i === battleState.currentIndex ? (e.isBoss ? "#C9A227" : d?.color || "#8A8578") : "#232E3D", border: `1.5px solid ${i === battleState.currentIndex ? (e.isBoss ? "#C9A227" : d?.color || "#8A8578") : "#33414F"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            {e.isBoss && i >= battleState.currentIndex && <span style={{ fontSize: 8 }}>👑</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Battle log — scrollable, each line clearly separated */}
+            <div style={{ overflowY: "auto", padding: "10px 16px", flex: 1 }}>
+              {battleState.log.slice(-10).map((line, i, arr) => {
+                const isLatest = i === arr.length - 1;
+                const color = line.includes("CRIT") || line.includes("💥") ? "#C9A227"
+                  : line.includes("💀") ? "#4C9A6A"
+                  : line.includes("💔") ? "#8A2E44"
+                  : line.includes("🎁") ? RARITIES.rare.color
+                  : line.includes("🛡") ? "#4FA3C9"
+                  : line.includes("⚔") ? accent
+                  : "#EDE4D3";
+                return (
+                  <div key={i} style={{ fontSize: 12, color, padding: "5px 0", borderBottom: i < arr.length - 1 ? "1px solid #1F2836" : "none", opacity: isLatest ? 1 : 0.65 + (i / arr.length) * 0.35 }}>
+                    {line}
+                  </div>
+                );
+              })}
+              {battleAnimating && <div style={{ fontSize: 11, color: "#5C6773", marginTop: 4 }}>...</div>}
+
+              {/* Drop reveal */}
+              {battleState.phase === "drop" && battleState.pendingDrop && (
+                <div style={{ background: RARITIES[battleState.pendingDrop.item.rarity].glow, border: `1px solid ${RARITIES[battleState.pendingDrop.item.rarity].color}`, borderRadius: 12, padding: "14px", marginTop: 8, textAlign: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 36, marginBottom: 6 }}>{battleState.pendingDrop.item.icon(RARITIES[battleState.pendingDrop.item.rarity].color)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: RARITIES[battleState.pendingDrop.item.rarity].color }}>{battleState.pendingDrop.item.label}</div>
+                  <div style={{ fontSize: 10, color: "#8A8578", margin: "3px 0" }}>{battleState.pendingDrop.item.desc}</div>
+                  <div style={{ fontSize: 10, color: RARITIES[battleState.pendingDrop.item.rarity].color, fontWeight: 700 }}>{RARITIES[battleState.pendingDrop.item.rarity].label} · {battleState.pendingDrop.isNew ? "✨ New item!" : "Duplicate"}</div>
+                  <button onClick={claimDrop} className="qlog-btn" style={{ marginTop: 10, background: accent, border: "none", borderRadius: 8, padding: "7px 20px", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Claim & Continue</button>
+                </div>
+              )}
+
+              {/* Victory screen */}
+              {battleState.phase === "victory" && (
+                <div style={{ textAlign: "center", padding: "20px 0" }}>
+                  <Trophy size={40} color={accent} style={{ marginBottom: 10 }} />
+                  <div style={{ fontSize: 17, fontWeight: 700, color: accent, fontFamily: "Georgia, serif", marginBottom: 6 }}>All enemies defeated!</div>
+                  <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 16 }}>
+                    <span style={{ color: "#C9A227", fontWeight: 700 }}>+{battleState.goldEarned}g</span> · <span style={{ color: accent, fontWeight: 700 }}>+{battleState.xpEarned} XP</span>
+                  </div>
+                  <button onClick={() => { setBattleState(null); setPendingBattle(null); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 10, padding: "12px 36px", fontSize: 14, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Claim Rewards</button>
+                </div>
+              )}
+
+              {/* Defeat screen */}
+              {battleState.phase === "defeat" && (
+                <div style={{ textAlign: "center", padding: "20px 0" }}>
+                  <div style={{ fontSize: 36, marginBottom: 10 }}>💔</div>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "#8A2E44", fontFamily: "Georgia, serif", marginBottom: 6 }}>Defeated!</div>
+                  <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 4 }}>You fell before clearing all enemies.</div>
+                  {battleState.goldEarned > 0 || battleState.xpEarned > 0 ? (
+                    <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 16 }}>
+                      Still earned: <span style={{ color: "#C9A227", fontWeight: 700 }}>+{battleState.goldEarned}g</span> · <span style={{ color: accent, fontWeight: 700 }}>+{battleState.xpEarned} XP</span>
+                    </div>
+                  ) : <div style={{ marginBottom: 16 }} />}
+                  <button onClick={() => { setBattleState(null); setPendingBattle(null); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 10, padding: "12px 36px", fontSize: 14, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>End Battle</button>
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            {battleState.phase === "fighting" && (
+              <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #33414F", flexShrink: 0, display: "flex", gap: 8 }}>
+                <button onClick={() => doPlayerTurn(false)} disabled={battleAnimating} className="qlog-btn"
+                  style={{ flex: 2, background: battleAnimating ? "#2C3947" : "#8A2E44", border: "none", borderRadius: 10, padding: "13px 0", fontSize: 14, fontWeight: 700, color: battleAnimating ? "#5C6773" : "#EDE4D3", cursor: battleAnimating ? "default" : "pointer" }}>
+                  ⚔ Attack
+                </button>
+                <button onClick={doBlock} disabled={battleAnimating || blockCooldown > 0} className="qlog-btn"
+                  style={{ flex: 1, background: battleAnimating || blockCooldown > 0 ? "#2C3947" : "#232E3D", border: `1px solid ${blockCooldown > 0 ? "#33414F" : "#4FA3C9"}`, borderRadius: 10, padding: "13px 0", fontSize: 12, fontWeight: 700, color: battleAnimating || blockCooldown > 0 ? "#5C6773" : "#4FA3C9", cursor: battleAnimating || blockCooldown > 0 ? "default" : "pointer" }}>
+                  {blockCooldown > 0 ? `🛡 (${blockCooldown})` : "🛡 Block"}
+                </button>
+                <button onClick={abandonBattle} className="qlog-btn"
+                  style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "13px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Flee</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Floating timer */}
       {focus && focus.started && !focusOpen && (
         <button onClick={() => setFocusOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: 20, right: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${timerColor}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
@@ -1461,6 +2023,7 @@ export default function App() {
               <button onClick={() => setTotalXP((x) => x + Math.max(0, Number(devXP) || 0))} className="qlog-btn" style={{ background: "#4C9A6A", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+XP</button>
             </div>
             <button onClick={() => { setInventory(ITEM_CATALOGUE.map((i) => i.id)); }} className="qlog-btn" style={{ background: "#8A5FBF", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Unlock All</button>
+            <button onClick={simulateBattle} className="qlog-btn" style={{ background: "#C1652B", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>⚔ Sim Battle</button>
             <button onClick={() => setDevMode(false)} style={{ background: "none", border: "none", color: "#5C6773", fontSize: 11, cursor: "pointer", marginLeft: "auto" }}>close</button>
           </div>
         )}
@@ -1881,100 +2444,150 @@ export default function App() {
 
         {/* Collection / Gear Modal */}
         {collectionOpen && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.82)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setCollectionOpen(false)}>
-            <div style={{ background: "#1B2430", border: "1px solid #33414F", borderRadius: 16, width: "100%", maxWidth: 440, position: "relative", maxHeight: "90vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.85)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }} onClick={() => { if (pickingSlot) { setPickingSlot(null); } else { setCollectionOpen(false); } }}>
+            <div style={{ background: "#1B2430", border: "1px solid #33414F", borderRadius: 16, width: "100%", maxWidth: 480, maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+
               {/* Sticky header */}
-              <div style={{ position: "sticky", top: 0, background: "#1B2430", borderRadius: "16px 16px 0 0", borderBottom: "1px solid #33414F", padding: "16px 22px 12px", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <h3 style={{ margin: "0 0 2px", fontSize: 17, fontWeight: 700, fontFamily: "Georgia, serif" }}>⚔ Gear & Collection</h3>
-                  <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>{inventory.length} / {ITEM_CATALOGUE.length} items · Tap to equip</p>
+              <div style={{ background: "#1B2430", borderRadius: "16px 16px 0 0", borderBottom: "1px solid #33414F", padding: "14px 18px 14px", flexShrink: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <h3 style={{ margin: "0 0 2px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>
+                      {pickingSlot ? `Choose ${SLOT_LABELS[pickingSlot]}` : "⚔ Gear & Collection"}
+                    </h3>
+                    <p style={{ fontSize: 10, color: "#5C6773", margin: 0 }}>
+                      {pickingSlot ? "Tap an item to equip it" : `${inventory.length} / ${ITEM_CATALOGUE.length} items collected`}
+                    </p>
+                  </div>
+                  <button onClick={() => pickingSlot ? setPickingSlot(null) : setCollectionOpen(false)}
+                    style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "5px 9px", color: "#EDE4D3", cursor: "pointer" }}>
+                    {pickingSlot ? <ChevronLeft size={15} /> : <X size={15} />}
+                  </button>
                 </div>
-                <button onClick={() => setCollectionOpen(false)} aria-label="Close" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "6px 10px", color: "#EDE4D3", cursor: "pointer" }}><X size={16} /></button>
+                {/* Collection progress — only on main view */}
+                {!pickingSlot && (
+                  <div style={{ height: 3, background: "#141C27", borderRadius: 2, overflow: "hidden", marginTop: 10 }}>
+                    <div style={{ height: "100%", width: `${(inventory.length / ITEM_CATALOGUE.length) * 100}%`, background: `linear-gradient(90deg, #4C9A6A, ${accent})`, borderRadius: 2 }} />
+                  </div>
+                )}
               </div>
 
-              <div style={{ overflowY: "auto", padding: "16px 22px 22px" }}>
-                {/* Progress bar */}
-                <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 14 }}>
-                  <div style={{ height: "100%", width: `${(inventory.length / ITEM_CATALOGUE.length) * 100}%`, background: `linear-gradient(90deg, #4C9A6A, ${accent})`, borderRadius: 4 }} />
-                </div>
+              <div style={{ overflowY: "auto", padding: "14px 18px 20px", flex: 1 }}>
 
-                {/* Active stats panel */}
-                <div style={{ background: "#232E3D", border: `1px solid ${activeStats.activeSets.length > 0 ? "#C9A227" : "#33414F"}`, borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-                  {activeStats.activeSets.length > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "#C9A227", textTransform: "uppercase", letterSpacing: 0.5 }}>✦ Active Sets</span>
-                    </div>
-                  )}
-                  {activeStats.activeSets.map((s) => (
-                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color }} />
-                      <span style={{ fontSize: 11, fontWeight: 600, color: s.color }}>{s.label}</span>
-                      <span style={{ fontSize: 11, color: "#8A8578" }}>— {s.desc}</span>
+                {/* Active stats bar */}
+                <div style={{ background: "#232E3D", border: `1px solid ${activeStats.activeSets.length > 0 ? "#C9A227" : "#33414F"}`, borderRadius: 10, padding: "9px 12px", marginBottom: 14, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                  {activeStats.activeSets.length > 0 && activeStats.activeSets.map((s) => (
+                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: s.color }} />
+                      <span style={{ fontSize: 10, fontWeight: 700, color: s.color }}>{s.label}</span>
                     </div>
                   ))}
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: activeStats.activeSets.length > 0 ? 8 : 0 }}>
-                    <span style={{ fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
-                    <span style={{ fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat} gold/quest</span>
-                    <span style={{ fontSize: 11, color: "#5C6773" }}>🛡 {activeStats.defense} DEF · ❤ {activeStats.maxHealth} HP (future)</span>
-                  </div>
+                  <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
+                  <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat}g</span>
+                  <span style={{ fontSize: 10, color: "#5C6773" }}>🛡 {activeStats.defense} · ❤ {activeStats.maxHealth}</span>
                 </div>
 
-                {/* Set bonus guide */}
-                <div style={{ marginBottom: 16 }}>
-                  <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.5 }}>Set Bonuses</p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {SETS.map((s) => {
-                      const equippedIds = Object.values(equipped).filter(Boolean);
-                      const matches = s.items.filter((id) => equippedIds.includes(id)).length;
-                      const isActive = matches >= s.requiredCount;
-                      return (
-                        <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, background: isActive ? s.color + "22" : "#232E3D", border: `1px solid ${isActive ? s.color : "#2C3947"}`, borderRadius: 8, padding: "7px 10px" }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: isActive ? s.color : "#3A4552", flexShrink: 0 }} />
-                          <div style={{ flex: 1 }}>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: isActive ? s.color : "#8A8578" }}>{s.label}</span>
-                            <span style={{ fontSize: 10, color: "#5C6773" }}> — {s.desc}</span>
-                          </div>
-                          <span style={{ fontSize: 10, color: isActive ? s.color : "#5C6773", fontWeight: 700 }}>{matches}/{s.requiredCount}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Item grid by slot */}
-                {SLOTS.map((slot) => {
-                  const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === slot);
+                {/* ---- SLOT PICKER VIEW ---- */}
+                {pickingSlot && (() => {
+                  const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === pickingSlot);
                   return (
-                    <div key={slot} style={{ marginBottom: 20 }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.5 }}>{SLOT_LABELS[slot]}</p>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))", gap: 8 }}>
-                        {slotItems.map((item) => {
-                          const owned = inventory.includes(item.id);
-                          const isEquipped = equipped[slot] === item.id;
-                          const rar = RARITIES[item.rarity];
-                          const hasBonus = Object.values(item.bonuses || {}).some((v) => v > 0);
-                          return (
-                            <div key={item.id} onClick={() => owned && equipItem(item.id)}
-                              style={{ background: isEquipped ? rar.glow : owned ? "#232E3D" : "#1A2330", border: `1.5px solid ${isEquipped ? rar.color : owned ? rar.color + "55" : "#2C3947"}`, borderRadius: 10, padding: "10px 6px", textAlign: "center", cursor: owned ? "pointer" : "default", position: "relative", opacity: owned ? 1 : 0.45 }}>
-                              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, marginBottom: 4, filter: owned ? "none" : "grayscale(1)" }}>
-                                {owned ? item.icon(rar.color) : <Lock size={16} color="#4A5563" />}
-                              </div>
-                              <div style={{ fontSize: 9, fontWeight: 700, color: owned ? rar.color : "#4A5563", lineHeight: 1.2 }}>{owned ? item.label : "???"}</div>
-                              {owned && hasBonus && (
-                                <div style={{ fontSize: 8, color: "#4C9A6A", marginTop: 2 }}>
-                                  {item.bonuses.xpPct ? `+${Math.round(item.bonuses.xpPct * 100)}%XP ` : ""}
-                                  {item.bonuses.goldFlat ? `+${item.bonuses.goldFlat}g` : ""}
-                                </div>
-                              )}
-                              {isEquipped && <div style={{ position: "absolute", top: 4, right: 4, width: 7, height: 7, borderRadius: "50%", background: rar.color }} />}
-                              {owned && !isEquipped && <div style={{ fontSize: 8, color: "#5C6773", marginTop: 1 }}>tap</div>}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 10 }}>
+                      {slotItems.map((item) => {
+                        const owned = inventory.includes(item.id);
+                        const isEquipped = equipped[pickingSlot] === item.id;
+                        const rar = RARITIES[item.rarity];
+                        const hasBns = Object.values(item.bonuses || {}).some((v) => v > 0);
+                        const itemSets = getItemSets(item.id);
+                        return (
+                          <div key={item.id} onClick={() => { if (owned) { equipItem(item.id); setPickingSlot(null); } }}
+                            style={{ background: isEquipped ? rar.glow : owned ? "#232E3D" : "#1A2330", border: `1.5px solid ${isEquipped ? rar.color : owned ? rar.color + "55" : "#2C3947"}`, borderRadius: 12, padding: "12px 8px 8px", textAlign: "center", cursor: owned ? "pointer" : "default", position: "relative", opacity: owned ? 1 : 0.4 }}>
+                            {/* Equipped dot */}
+                            {isEquipped && <div style={{ position: "absolute", top: 5, right: 5, width: 7, height: 7, borderRadius: "50%", background: rar.color }} />}
+                            {/* Icon */}
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 28, marginBottom: 4 }}>
+                              {owned ? item.icon(rar.color) : <Lock size={16} color="#4A5563" />}
                             </div>
-                          );
-                        })}
-                      </div>
+                            {/* Name */}
+                            <div style={{ fontSize: 9, fontWeight: 700, color: owned ? rar.color : "#4A5563", lineHeight: 1.2, marginBottom: 2 }}>{owned ? item.label : "???"}</div>
+                            {/* Rarity */}
+                            <div style={{ fontSize: 8, color: owned ? rar.color + "99" : "#3A4552", marginBottom: 3 }}>{rar.label}</div>
+                            {/* Bonuses */}
+                            {owned && hasBns && (
+                              <div style={{ fontSize: 8, color: "#4C9A6A", marginBottom: 2 }}>
+                                {item.bonuses.xpPct ? `+${Math.round(item.bonuses.xpPct*100)}%XP ` : ""}
+                                {item.bonuses.goldFlat ? `+${item.bonuses.goldFlat}g` : ""}
+                              </div>
+                            )}
+                            {item.futureStats?.defense > 0 && owned && <div style={{ fontSize: 7, color: "#5C6773", marginBottom: 3 }}>DEF {item.futureStats.defense}</div>}
+                            {/* Set membership chips */}
+                            {owned && itemSets.length > 0 && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 2, justifyContent: "center", marginTop: 2 }}>
+                                {itemSets.map(({ set, ownedCount }) => (
+                                  <span key={set.id} style={{ fontSize: 7, padding: "1px 4px", borderRadius: 10, background: set.color + "22", color: set.color, border: `1px solid ${set.color}44`, fontWeight: 700 }}>
+                                    {set.label.replace(" Set","").replace(" Knight","").substring(0,8)} {ownedCount}/{set.requiredCount}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {!owned && <div style={{ fontSize: 7, color: "#4A5563", marginTop: 2 }}>Locked</div>}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
-                })}
+                })()}
+
+                {/* ---- MAIN SLOT CARD VIEW ---- */}
+                {!pickingSlot && (
+                  <div>
+                    {/* Gear section */}
+                    <p style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.8 }}>⚔ Gear</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 18 }}>
+                      {GEAR_SLOTS.map((slot) => {
+                        const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
+                        const rar = equippedItem ? RARITIES[equippedItem.rarity] : null;
+                        const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === slot);
+                        const ownedCount = slotItems.filter((i) => inventory.includes(i.id)).length;
+                        return (
+                          <button key={slot} onClick={() => setPickingSlot(slot)} className="qlog-btn"
+                            style={{ background: equippedItem ? rar.glow : "#232E3D", border: `1.5px solid ${equippedItem ? rar.color : "#33414F"}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: "pointer", position: "relative" }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{SLOT_LABELS[slot]}</div>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, marginBottom: 5 }}>
+                              {equippedItem ? equippedItem.icon(rar.color) : <Plus size={16} color="#33414F" />}
+                            </div>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", lineHeight: 1.2 }}>{equippedItem ? equippedItem.label : "Empty"}</div>
+                            <div style={{ fontSize: 8, color: "#5C6773", marginTop: 2 }}>{ownedCount}/{slotItems.length}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Cosmetics section */}
+                    <p style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.8 }}>✨ Cosmetics</p>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
+                      {COSMETIC_SLOTS.map((slot) => {
+                        const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
+                        const rar = equippedItem ? RARITIES[equippedItem.rarity] : null;
+                        const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === slot);
+                        const ownedCount = slotItems.filter((i) => inventory.includes(i.id)).length;
+                        return (
+                          <button key={slot} onClick={() => setPickingSlot(slot)} className="qlog-btn"
+                            style={{ background: equippedItem ? rar.glow : "#232E3D", border: `1.5px solid ${equippedItem ? rar.color : "#33414F"}`, borderRadius: 12, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textAlign: "left" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, flexShrink: 0 }}>
+                              {equippedItem ? equippedItem.icon(rar.color) : <Plus size={16} color="#33414F" />}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.5 }}>{SLOT_LABELS[slot]}</div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{equippedItem ? equippedItem.label : "None"}</div>
+                              {slot === "theme" && equippedItem && <div style={{ width: 8, height: 8, borderRadius: "50%", background: equippedItem.value, marginTop: 2 }} />}
+                            </div>
+                            <div style={{ fontSize: 8, color: "#5C6773", flexShrink: 0 }}>{ownedCount}/{slotItems.length}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
               </div>
             </div>
           </div>
