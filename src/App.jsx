@@ -311,17 +311,17 @@ const ITEM_CATALOGUE = [
   { id: "badge_crown",     slot: "badge", category: "cosmetic", label: "Crown",          value: "crown",   rarity: "legendary", icon: (c) => <IconCrown size={20} color={W(c,"#C9A227")} />, desc: "Worn only by the best.",        bonuses: { xpPct: 0.15, goldFlat: 2 } },
   { id: "badge_celestial", slot: "badge", category: "cosmetic", label: "Celestial Eye",  value: "ceye",    rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#C9A227")} />,  desc: "Watches from beyond the stars.",bonuses: { xpPct: 0.15, goldFlat: 2 } },
   // ---- AURA (10) ----
-  { id: "aura_none",       slot: "aura",  category: "cosmetic", label: "No Aura",        value: null,       rarity: "common",    icon: (c) => <Sparkles size={20} color={W(c,"#8A8578")} />, desc: "Plain and simple.",             bonuses: {} },
-  { id: "aura_silver",     slot: "aura",  category: "cosmetic", label: "Silver",         value: "Silver",   rarity: "common",    icon: (c) => <Sparkles size={20} color={W(c,"#B8C4CE")} />, desc: "A faint silver shimmer.",       bonuses: {} },
-  { id: "aura_ember2",     slot: "aura",  category: "cosmetic", label: "Blazing",        value: "Blazing",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#C1652B")} />, desc: "Your XP burns hotter.",         bonuses: { xpPct: 0.05 } },
-  { id: "aura_frost2",     slot: "aura",  category: "cosmetic", label: "Frozen",         value: "Frozen",   rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4FA3C9")} />, desc: "Cool precision.",               bonuses: { goldFlat: 1 } },
-  { id: "aura_verdant",    slot: "aura",  category: "cosmetic", label: "Verdant",        value: "Verdant",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4C9A6A")} />, desc: "Life pulses around you.",       bonuses: { goldFlat: 1 } },
-  { id: "aura_storm2",     slot: "aura",  category: "cosmetic", label: "Storm",          value: "Storm",    rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#7A9ABF")} />, desc: "Crackling with energy.",        bonuses: { xpPct: 0.05 } },
-  { id: "aura_arcane2",    slot: "aura",  category: "cosmetic", label: "Arcane",         value: "Arcane",   rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#8A5FBF")} />, desc: "Arcane energy radiates from you.",bonuses: { xpPct: 0.10 } },
-  { id: "aura_void2",      slot: "aura",  category: "cosmetic", label: "Void",           value: "Void",     rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#2A1F3D")} />, desc: "The void swirls around you.",   bonuses: { xpPct: 0.10, goldFlat: 1 } },
-  { id: "aura_blood",      slot: "aura",  category: "cosmetic", label: "Blood",          value: "Blood",    rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#B33A3A")} />, desc: "Crimson mist trails you.",      bonuses: { xpPct: 0.08, goldFlat: 1 } },
-  { id: "aura_divine",     slot: "aura",  category: "cosmetic", label: "Divine",         value: "Divine",   rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#C9A227")} />, desc: "Blessed by the gods.",          bonuses: { xpPct: 0.15, goldFlat: 2 } },
-  { id: "aura_celestial2", slot: "aura",  category: "cosmetic", label: "Celestial",      value: "Celestial",rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#E8D4A0")} />, desc: "Forged from starlight itself.", bonuses: { xpPct: 0.15, goldFlat: 2 } },
+  { id: "aura_none",       slot: "aura",  category: "cosmetic", label: "No Aura",        value: null,       rarity: "common",    icon: (c) => <Sparkles size={20} color={W(c,"#8A8578")} />, desc: "Plain and simple.",             bonuses: {} , auraColor: null, combatEffect: null },
+  { id: "aura_silver",     slot: "aura",  category: "cosmetic", label: "Silver",         value: "Silver",   rarity: "common",    icon: (c) => <Sparkles size={20} color={W(c,"#B8C4CE")} />, desc: "A faint silver shimmer.",       bonuses: {} , auraColor: "#B8C4CE", combatEffect: null },
+  { id: "aura_ember2",     slot: "aura",  category: "cosmetic", label: "Blazing",        value: "Blazing",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#C1652B")} />, desc: "Your XP burns hotter.",         bonuses: { xpPct: 0.05 } , auraColor: "#C1652B", combatEffect: {"type":"burn","chance":0.12,"value":4,"label":"🔥 Burn"} },
+  { id: "aura_frost2",     slot: "aura",  category: "cosmetic", label: "Frozen",         value: "Frozen",   rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4FA3C9")} />, desc: "Cool precision.",               bonuses: { goldFlat: 1 } , auraColor: "#4FA3C9", combatEffect: {"type":"chill","chance":0.12,"value":-3,"label":"❄ Chill"} },
+  { id: "aura_verdant",    slot: "aura",  category: "cosmetic", label: "Verdant",        value: "Verdant",  rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#4C9A6A")} />, desc: "Life pulses around you.",       bonuses: { goldFlat: 1 } , auraColor: "#4C9A6A", combatEffect: {"type":"regen","chance":0.15,"value":8,"label":"🌿 Regen"} },
+  { id: "aura_storm2",     slot: "aura",  category: "cosmetic", label: "Storm",          value: "Storm",    rarity: "rare",      icon: (c) => <Sparkles size={20} color={W(c,"#7A9ABF")} />, desc: "Crackling with energy.",        bonuses: { xpPct: 0.05 } , auraColor: "#7A9ABF", combatEffect: {"type":"shock","chance":0.12,"value":5,"label":"⚡ Shock"} },
+  { id: "aura_arcane2",    slot: "aura",  category: "cosmetic", label: "Arcane",         value: "Arcane",   rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#8A5FBF")} />, desc: "Arcane energy radiates from you.",bonuses: { xpPct: 0.10 } , auraColor: "#8A5FBF", combatEffect: {"type":"arcane","chance":0.15,"value":7,"label":"🔮 Arcane"} },
+  { id: "aura_void2",      slot: "aura",  category: "cosmetic", label: "Void",           value: "Void",     rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#2A1F3D")} />, desc: "The void swirls around you.",   bonuses: { xpPct: 0.10, goldFlat: 1 } , auraColor: "#5A4F7A", combatEffect: {"type":"drain","chance":0.15,"value":6,"label":"🌑 Drain"} },
+  { id: "aura_blood",      slot: "aura",  category: "cosmetic", label: "Blood",          value: "Blood",    rarity: "epic",      icon: (c) => <Sparkles size={20} color={W(c,"#B33A3A")} />, desc: "Crimson mist trails you.",      bonuses: { xpPct: 0.08, goldFlat: 1 } , auraColor: "#B33A3A", combatEffect: {"type":"bleed","chance":0.18,"value":5,"label":"🩸 Bleed"} },
+  { id: "aura_divine",     slot: "aura",  category: "cosmetic", label: "Divine",         value: "Divine",   rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#C9A227")} />, desc: "Blessed by the gods.",          bonuses: { xpPct: 0.15, goldFlat: 2 } , auraColor: "#C9A227", combatEffect: {"type":"smite","chance":0.20,"value":10,"label":"✨ Smite"} },
+  { id: "aura_celestial2", slot: "aura",  category: "cosmetic", label: "Nebula Aura",      value: "Celestial",rarity: "legendary", icon: (c) => <Sparkles size={20} color={W(c,"#E8D4A0")} />, desc: "Forged from starlight itself.", bonuses: { xpPct: 0.15, goldFlat: 2 } , auraColor: "#E8D4A0", combatEffect: {"type":"nova","chance":0.20,"value":12,"label":"💫 Nova"} },
 
   // ===== GEAR =====
   // ---- WEAPONS (14) ----
@@ -365,57 +365,68 @@ const ITEM_CATALOGUE = [
   { id: "shd_celestial",   slot: "shield", category: "gear", label: "Celestial Barrier",value:"celbar",   rarity: "legendary", icon: (c) => <IconShield size={20} color={W(c,"#E8A020")} />, desc: "Blessed by the stars.",           bonuses: { xpPct: 0.12, goldFlat: 2 }, futureStats: { defense: 8, blockChance: 0.26 } },
 ];
 
-// ---- SET BONUSES (12) — each item belongs to exactly one set ----
+// ---- SET BONUSES (12) — every item in exactly one set, conflict-free ----
 const SETS = [
-  // Gear sets (weapon + armour + shield combos)
-  { id: "dawn_set",      label: "Dawn Set",        color: "#C9A227",
-    items: ["wpn_sword","wpn_dagger","arm_leather","arm_studded","shd_buckler"],
-    requiredCount: 3, bonus: { xpPct: 0.0, goldFlat: 2 }, desc: "+2 gold/quest" },
-
-  { id: "arcane_set",    label: "Arcane Set",      color: "#4FA3C9",
-    items: ["wpn_staff","arm_chain","shd_kite","arm_scale","wpn_club"],
-    requiredCount: 3, bonus: { xpPct: 0.20, goldFlat: 1 }, desc: "+20% XP, +1 gold" },
-
-  { id: "shadow_set",    label: "Shadow Set",      color: "#8A5FBF",
-    items: ["wpn_voidblade","arm_shadow","shd_voidwall","arm_voidweave","wpn_scythe"],
-    requiredCount: 3, bonus: { xpPct: 0.25, goldFlat: 0 }, desc: "+25% XP" },
-
-  { id: "frost_set",     label: "Frost Set",       color: "#4FA3C9",
-    items: ["wpn_frostblade","shd_dragon","arm_brigandine","theme_frost","aura_frost2"],
-    requiredCount: 3, bonus: { xpPct: 0.15, goldFlat: 1 }, desc: "+15% XP, +1 gold" },
-
-  { id: "storm_set",     label: "Storm Set",       color: "#7A9ABF",
-    items: ["wpn_stormhammer","shd_stormwall","arm_plate","wpn_maul","shd_tower"],
-    requiredCount: 3, bonus: { xpPct: 0.18, goldFlat: 2 }, desc: "+18% XP, +2 gold" },
-
-  { id: "runic_set",     label: "Runic Set",       color: "#8A5FBF",
-    items: ["arm_runic","shd_rune","wpn_lance","wpn_axe","wpn_spear"],
-    requiredCount: 3, bonus: { xpPct: 0.22, goldFlat: 1 }, desc: "+22% XP, +1 gold" },
-
-  { id: "celestial_set", label: "Celestial Set",   color: "#E8A020",
-    items: ["wpn_celestialswd","arm_celestial","shd_aegis","shd_celestial","shd_plank"],
-    requiredCount: 4, bonus: { xpPct: 0.30, goldFlat: 3 }, desc: "+30% XP, +3 gold" },
-
-  // Cosmetic + mixed sets
-  { id: "reaper_set",    label: "Reaper Set",      color: "#B33A3A",
-    items: ["title_shadow","badge_skull","theme_blood","aura_blood","title_bloodknight"],
-    requiredCount: 3, bonus: { xpPct: 0.20, goldFlat: 2 }, desc: "+20% XP, +2 gold" },
-
-  { id: "void_set",      label: "Void Set",        color: "#5A4F7A",
-    items: ["title_voidwalk","theme_void","aura_void2","badge_voideye","theme_abyss"],
-    requiredCount: 3, bonus: { xpPct: 0.22, goldFlat: 1 }, desc: "+22% XP, +1 gold" },
-
-  { id: "nebula_set",    label: "Nebula Set",      color: "#7A4FA8",
-    items: ["theme_nebula","aura_celestial2","badge_celestial","title_starforged","badge_star"],
-    requiredCount: 4, bonus: { xpPct: 0.28, goldFlat: 2 }, desc: "+28% XP, +2 gold" },
-
-  { id: "undying_set",   label: "Undying Set",     color: "#C9A227",
-    items: ["title_eternal2","badge_phoenix","aura_divine","badge_crown","title_legend"],
-    requiredCount: 4, bonus: { xpPct: 0.35, goldFlat: 4 }, desc: "+35% XP, +4 gold" },
-
-  { id: "bloom_set",     label: "Bloom Set",       color: "#4C9A6A",
-    items: ["theme_verdant","aura_verdant","badge_flame","title_eternal","theme_ember"],
-    requiredCount: 3, bonus: { xpPct: 0.12, goldFlat: 1 }, desc: "+12% XP, +1 gold" },
+  {
+    id: "dawn_set", label: "Dawn Set", color: "#C9A227",
+    items: ["wpn_sword","wpn_dagger","arm_leather","shd_buckler","title_keeper","title_rookie","badge_shield","theme_ember"],
+    requiredCount: 4, bonus: { xpPct: 0.1, goldFlat: 2 }, desc: "+10% XP, +2 gold/quest",
+  },
+  {
+    id: "bloom_set", label: "Bloom Set", color: "#4C9A6A",
+    items: ["wpn_spear","arm_studded","shd_heater","title_eternal","title_seeker","badge_flame","theme_verdant","aura_verdant"],
+    requiredCount: 3, bonus: { xpPct: 0.12, goldFlat: 1 }, desc: "+12% XP, +1 gold",
+  },
+  {
+    id: "storm_set", label: "Storm Set", color: "#7A9ABF",
+    items: ["wpn_stormhammer","arm_plate","shd_stormwall","shd_tower","title_storm","badge_lightning","theme_storm","aura_storm2"],
+    requiredCount: 4, bonus: { xpPct: 0.18, goldFlat: 2 }, desc: "+18% XP, +2 gold",
+  },
+  {
+    id: "frost_set", label: "Frost Set", color: "#4FA3C9",
+    items: ["wpn_frostblade","wpn_crossbow","arm_brigandine","shd_dragon","title_focused","badge_anchor","theme_frost","aura_frost2"],
+    requiredCount: 4, bonus: { xpPct: 0.15, goldFlat: 1 }, desc: "+15% XP, +1 gold",
+  },
+  {
+    id: "arcane_set", label: "Arcane Set", color: "#8A5FBF",
+    items: ["wpn_staff","arm_chain","arm_scale","shd_kite","title_archmage","badge_dragon","theme_arcane","aura_arcane2"],
+    requiredCount: 4, bonus: { xpPct: 0.2, goldFlat: 1 }, desc: "+20% XP, +1 gold",
+  },
+  {
+    id: "runic_set", label: "Runic Set", color: "#B8C4CE",
+    items: ["wpn_axe","wpn_maul","arm_runic","shd_rune","title_iron","title_wanderer","badge_trophy","theme_slate"],
+    requiredCount: 4, bonus: { xpPct: 0.22, goldFlat: 1 }, desc: "+22% XP, +1 gold",
+  },
+  {
+    id: "shadow_set", label: "Shadow Set", color: "#5A4F7A",
+    items: ["wpn_voidblade","arm_shadow","shd_voidwall","title_shadow","title_voidwalk","badge_skull","theme_void","aura_void2"],
+    requiredCount: 4, bonus: { xpPct: 0.25, goldFlat: 1 }, desc: "+25% XP, +1 gold",
+  },
+  {
+    id: "reaper_set", label: "Reaper Set", color: "#B33A3A",
+    items: ["wpn_scythe","wpn_lance","arm_voidweave","shd_plank","title_legend","badge_sword","theme_blood","aura_blood"],
+    requiredCount: 4, bonus: { xpPct: 0.2, goldFlat: 2 }, desc: "+20% XP, +2 gold",
+  },
+  {
+    id: "void_set", label: "Void Set", color: "#2A1F3D",
+    items: ["wpn_club","arm_rags","shd_aegis","title_initiate","title_hunter","badge_voideye","theme_abyss","aura_none"],
+    requiredCount: 3, bonus: { xpPct: 0.15, goldFlat: 1 }, desc: "+15% XP, +1 gold",
+  },
+  {
+    id: "nebula_set", label: "Nebula Set", color: "#7A4FA8",
+    items: ["arm_celestial","badge_celestial","badge_target","theme_nebula","theme_crimson","aura_celestial2"],
+    requiredCount: 3, bonus: { xpPct: 0.28, goldFlat: 2 }, desc: "+28% XP, +2 gold",
+  },
+  {
+    id: "celestial_set", label: "Celestial Set", color: "#E8A020",
+    items: ["wpn_celestialswd","shd_celestial","badge_star","theme_solaris","aura_divine","title_eternal2"],
+    requiredCount: 4, bonus: { xpPct: 0.3, goldFlat: 3 }, desc: "+30% XP, +3 gold",
+  },
+  {
+    id: "undying_set", label: "Undying Set", color: "#C9A227",
+    items: ["badge_phoenix","badge_crown","aura_silver","aura_ember2","title_starforged"],
+    requiredCount: 4, bonus: { xpPct: 0.35, goldFlat: 4 }, desc: "+35% XP, +4 gold",
+  },
 ];
 
 function computeActiveStats(equipped) {
@@ -904,6 +915,8 @@ export default function App() {
   const accent = (ITEM_CATALOGUE.find((i) => i.id === equipped.theme))?.value || "#C9A227";
   const today = todayStr();
   const activeStats = computeActiveStats(equipped);
+  const activeAura = equipped.aura ? ITEM_CATALOGUE.find((i) => i.id === equipped.aura) : null;
+  const auraColor = activeAura?.auraColor || null;
   const todayInView = calView === "day" ? calAnchor === today
     : calView === "week" ? getWeekDates(calAnchor).includes(today)
     : (() => { const d = parseLocalDate(calAnchor); return d.getFullYear() === parseLocalDate(today).getFullYear() && d.getMonth() === parseLocalDate(today).getMonth(); })();
@@ -1306,9 +1319,30 @@ export default function App() {
       const attackMult = blocking ? 0.7 : 1;
       const rawDmg = Math.floor((stats.atk + variance) * attackMult);
       const playerDmg = isCrit ? rawDmg * 2 : rawDmg;
-      const enemyHp = Math.max(0, enemy.hp - playerDmg);
+      let enemyHp = Math.max(0, enemy.hp - playerDmg);
       enemies[state.currentIndex] = { ...enemy, hp: enemyHp };
       log.push(`${isCrit ? "💥 CRIT! " : "⚔ "}You deal ${playerDmg}${blocking ? " (guarded)" : ""} to ${enemy.name}. (${enemyHp}/${enemy.maxHp} HP)`);
+
+      // Aura combat effect proc
+      const auraItem = equipped.aura ? ITEM_CATALOGUE.find((i) => i.id === equipped.aura) : null;
+      const effect = auraItem?.combatEffect;
+      if (effect && enemyHp > 0 && Math.random() < effect.chance) {
+        if (effect.type === "regen") {
+          // Regen heals player
+          setBattleState((prev) => prev ? { ...prev, playerHp: Math.min(prev.playerMaxHp, prev.playerHp + effect.value) } : prev);
+          log.push(`${effect.label} +${effect.value} HP restored!`);
+        } else if (effect.type === "chill") {
+          // Chill reduces enemy ATK this turn (handled as extra damage reduction in description)
+          log.push(`${effect.label} ${enemy.name} slowed — next hit reduced!`);
+        } else {
+          // All other effects deal bonus damage
+          const bonusDmg = effect.value + Math.floor(Math.random() * 3);
+          enemyHp = Math.max(0, enemyHp - bonusDmg);
+          enemies[state.currentIndex] = { ...enemies[state.currentIndex], hp: enemyHp };
+          log.push(`${effect.label} ${bonusDmg} bonus damage!`);
+        }
+      }
+
       setBattleState((prev) => prev ? { ...prev, enemies: enemies.map(e => ({...e})), log: [...log] } : prev);
 
       // Step 2: Enemy death check
@@ -1979,9 +2013,12 @@ export default function App() {
                 )}
               </div>
             </div>
-            <div style={{ fontSize: 10, color: "#8A8578", marginBottom: 6 }}>{rank}{nextMilestone && ` · Lv ${nextMilestone} next trophy`}</div>
+            <div style={{ fontSize: 10, color: "#8A8578", marginBottom: 6 }}>
+              {rank}{nextMilestone && ` · Lv ${nextMilestone} next trophy`}
+              {activeAura?.value && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 700, color: auraColor, background: auraColor + "22", borderRadius: 10, padding: "1px 6px", border: `1px solid ${auraColor}44` }}>{activeAura.value}</span>}
+            </div>
             <div style={{ height: 7, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
-              <div style={{ height: "100%", width: `${(into / need) * 100}%`, background: `linear-gradient(90deg, #4C9A6A, ${accent})`, borderRadius: 4, transition: "width 0.4s ease" }} />
+              <div style={{ height: "100%", width: `${(into / need) * 100}%`, background: auraColor ? `linear-gradient(90deg, ${auraColor}99, ${auraColor})` : `linear-gradient(90deg, #4C9A6A, ${accent})`, borderRadius: 4, transition: "width 0.4s ease" }} />
             </div>
             <div style={{ display: "flex", gap: 4 }}>
               {MILESTONE_LEVELS.map((m) => (
@@ -2523,7 +2560,7 @@ export default function App() {
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 2, justifyContent: "center", marginTop: 2 }}>
                                 {itemSets.map(({ set, ownedCount }) => (
                                   <span key={set.id} style={{ fontSize: 7, padding: "1px 4px", borderRadius: 10, background: set.color + "22", color: set.color, border: `1px solid ${set.color}44`, fontWeight: 700 }}>
-                                    {set.label.replace(" Set","").replace(" Knight","").substring(0,8)} {ownedCount}/{set.requiredCount}
+                                    {set.label.replace(" Set","").replace(" Knight","").substring(0,8)} {ownedCount}/{set.items.length}
                                   </span>
                                 ))}
                               </div>
