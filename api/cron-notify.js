@@ -73,9 +73,10 @@ export default async function handler(req, res) {
   const utcHour = now.getUTCHours();
   const dayOfWeek = now.getUTCDay();
   const dayKey = ["sun","mon","tue","wed","thu","fri","sat"][dayOfWeek];
-  const isMidday  = utcHour === 11;
-  const isEvening = utcHour === 19;
-  const isMonday  = dayOfWeek === 1;
+  const force     = req.query?.force === "1";
+  const isMidday  = force || utcHour === 11;
+  const isEvening = force || utcHour === 19;
+  const isMonday  = force || dayOfWeek === 1;
 
   const token = await getAccessToken();
   const doc = await firestoreGet(token, "storage/main");
@@ -92,6 +93,12 @@ export default async function handler(req, res) {
   const battleState   = appData.battleState;
 
   const notifications = [];
+
+  // Debug — log first habit so we can see its structure
+  if (habits.length > 0) {
+    console.log("Sample habit:", JSON.stringify(habits[0]));
+    console.log("Today:", today, "dayKey:", dayKey);
+  }
 
   // ---- Habit reminder — midday and evening every day ----
   const incompleteHabits = habits.filter(
