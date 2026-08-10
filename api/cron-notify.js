@@ -18,7 +18,7 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-const db = getFirestore();
+const db = getFirestore(undefined, "(default)");
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);

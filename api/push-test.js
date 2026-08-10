@@ -18,7 +18,7 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
-const db = getFirestore();
+const db = getFirestore(undefined, "(default)");
 
 export default async function handler(req, res) {
   if (req.headers["authorization"] !== `Bearer ${process.env.CRON_SECRET}`) {
