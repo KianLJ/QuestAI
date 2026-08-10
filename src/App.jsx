@@ -580,6 +580,8 @@ function buildEnemies(completedQuests, bossId) {
   return normals;
 }
 
+const VAPID_PUBLIC_KEY = "BN9N-JZIyMl9HuJ5nNwZ1GfwjL8U0283hXl4uRHhgAdpv1h6nDF3IygrZx820qMtedo-WqApDIbiPe1A5fXHaI4";
+
 const STORAGE_KEY = "quest-log-data";
 const XP_BASE = 100;
 const XP_INCREMENT = 15;
@@ -809,7 +811,9 @@ export default function App() {
   const [showCompleted, setShowCompleted] = useState(true);
   const [levelUp, setLevelUp] = useState(null);
   const [playerStats, setPlayerStats] = useState({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
-  const [statChoiceQueue, setStatChoiceQueue] = useState([]); // pending level-up choices
+  const [statChoiceQueue, setStatChoiceQueue] = useState([]);
+  const [notifPermission, setNotifPermission] = useState(() => typeof Notification !== "undefined" ? Notification.permission : "default");
+  const [swReg, setSwReg] = useState(null); // pending level-up choices
   const [streakBanner, setStreakBanner] = useState(null);
   const [bossBanner, setBossBanner] = useState(null);
   const [xpPop, setXpPop] = useState(null);
@@ -975,6 +979,40 @@ export default function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [focus?.running, focus?.questId]);
+  // ---- Service Worker registration ----
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").then((reg) => {
+      setSwReg(reg);
+      // Restore focus timer from Firestore if endsAt is in the future
+      if (loaded && focus?.endsAt && !focus.running) {
+        const remaining = Math.floor((focus.endsAt - Date.now()) / 1000);
+        if (remaining > 0) {
+          setFocus((f) => f ? { ...f, secondsLeft: remaining, running: true } : f);
+        }
+      }
+    }).catch((e) => console.warn("SW registration failed:", e));
+  }, [loaded]);
+
+  // ---- Schedule focus timer push when focus starts ----
+  useEffect(() => {
+    if (!swReg?.active || !focus?.running || !focus?.endsAt) return;
+    const q = quests.find((x) => x.id === focus.questId);
+    swReg.active.postMessage({
+      type: "SCHEDULE_NOTIFICATION",
+      id: "focus-timer",
+      title: "⏱ Focus timer done!",
+      body: q ? `"${q.title}" focus session complete.` : "Focus session complete.",
+      tag: "focus-timer",
+      url: "/",
+      fireAt: focus.endsAt,
+    });
+    return () => {
+      swReg.active?.postMessage({ type: "CANCEL_NOTIFICATION", id: "focus-timer" });
+    };
+  }, [focus?.running, focus?.endsAt, swReg]);
+
+
   const { level, into, need } = levelFromXP(totalXP);
   const rank = rankForLevel(level);
   const nextMilestone = MILESTONE_LEVELS.find((m) => level < m);
@@ -1269,7 +1307,7 @@ export default function App() {
     setFocus({ questId: quest.id, title: quest.title, xp: quest.xp, minutesInput: quest.estMinutes || 15, totalSeconds: null, secondsLeft: null, running: false, started: false });
     setFocusOpen(true);
   }
-  function startFocus() { setFocus((f) => { if (!f) return f; const total = f.minutesInput * 60; return { ...f, totalSeconds: total, secondsLeft: total, running: true, started: true }; }); }
+  function startFocus() { setFocus((f) => { if (!f) return f; const total = f.minutesInput * 60; const endsAt = Date.now() + total * 1000; return { ...f, totalSeconds: total, secondsLeft: total, running: true, started: true, endsAt }; }); }
   function toggleRun() { setFocus((f) => f ? { ...f, running: !f.running } : f); }
   function resetFocus() { setFocus((f) => f ? { ...f, secondsLeft: f.totalSeconds, running: false } : f); }
   function completeFromFocus() {
@@ -1853,6 +1891,37 @@ export default function App() {
     );
   }
 
+  // ---- Notification permission + push subscription ----
+  async function requestNotifPermission() {
+    if (!("Notification" in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifPermission(perm);
+    if (perm === "granted" && swReg) {
+      try {
+        const existing = await swReg.pushManager.getSubscription();
+        const sub = existing || await swReg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+        await fetch("/api/push-subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscription: sub.toJSON(), userId: "main" }),
+        });
+      } catch (e) {
+        console.warn("Push subscription failed:", e);
+      }
+    }
+  }
+
+  function urlB64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = atob(base64);
+    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+  }
+
+
   // ---- Render ----
   return (
     <div className="safe-top safe-bottom" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 60 }}>
@@ -2254,6 +2323,12 @@ export default function App() {
           <div style={{ flex: "1 1 200px", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
             <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}><Plus size={15} /> Add Quest</button>
             <button onClick={() => setDumpModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: "pointer" }}><FileText size={14} /> Brain Dump</button>
+            {"Notification" in window && notifPermission !== "granted" && (
+              <button onClick={requestNotifPermission} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: `1px solid ${accent}55`, borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: accent, cursor: "pointer" }}>🔔 Enable reminders</button>
+            )}
+            {"Notification" in window && notifPermission === "granted" && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: 11, color: "#4C9A6A", padding: "9px 0" }}>🔔 Reminders on</div>
+            )}
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => setStatsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><BarChart2 size={14} /> Stats</button>
               <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /> Settings</button>
