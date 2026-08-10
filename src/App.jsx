@@ -1903,11 +1903,11 @@ export default function App() {
           userVisibleOnly: true,
           applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY),
         });
-        await fetch("/api/push-subscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subscription: sub.toJSON(), userId: "main" }),
-        });
+        // Save subscription directly to Firestore using the existing client SDK
+        const { db } = await import("./firebase.js");
+        const { doc, setDoc } = await import("firebase/firestore");
+        await setDoc(doc(db, "storage", "main"), { pushSubscription: sub.toJSON() }, { merge: true });
+        console.log("Push subscription saved to Firestore");
       } catch (e) {
         console.warn("Push subscription failed:", e);
       }
