@@ -697,16 +697,19 @@ Tiers: trivial=under 2min, easy=quick low focus, medium=20-45min, hard=multi-ste
   return { difficulty: parsed.difficulty, estMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.estMinutes) || 15))), reason: parsed.reason };
 }
 
-async function parseBrainDump(text, todayISO) {
+async function parseBrainDump(text, todayISO, upcomingShifts) {
   const futureDates = Array.from({ length: 14 }, (_, i) => addDaysLocal(todayISO, i));
   const dateList = futureDates.join(", ");
+  const shiftContext = upcomingShifts
+    ? `\nWork shifts (avoid scheduling tasks during these hours on these dates): ${upcomingShifts}`
+    : "";
 
   const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON array. No prose, no explanation, no markdown, no backticks, no commentary before or after. Just the raw JSON array starting with [ and ending with ]. Any text outside the array will break the parser.
 
 Today is ${todayISO} (YYYY-MM-DD format). You are scheduling tasks onto a real calendar.
 
 Valid dates to assign tasks to: ${dateList}
-CRITICAL: Only assign dates from the list above. Use real dates like "${todayISO}", not day names like "mon".
+CRITICAL: Only assign dates from the list above. Use real dates like "${todayISO}", not day names like "mon".${shiftContext}
 
 Raw notes to convert into tasks:
 """${text}"""
@@ -719,6 +722,7 @@ Rules:
 - Add a short reason (max 6 words) explaining the difficulty
 - Spread tasks across different dates — don't pile everything on one day
 - Use deadline clues in the text ("by Friday", "next week", "tomorrow") to pick the right date
+- Avoid scheduling tasks on dates where the user has a work shift if possible, or schedule them before/after the shift
 - SMART SPLITTING: If a task benefits from multiple shorter sessions (e.g. "finish reading book", "study for exam"), split into 2-3 entries like "Read book — session 1" on different dates. Only split when it genuinely makes sense.
 
 OUTPUT FORMAT (a JSON array, nothing else):
@@ -811,6 +815,9 @@ export default function App() {
   const [showCompleted, setShowCompleted] = useState(true);
   const [levelUp, setLevelUp] = useState(null);
   const [playerStats, setPlayerStats] = useState({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+  const [statHistory, setStatHistory] = useState([]);
+  const [shifts, setShifts] = useState([]);
+  const [weekShiftModalOpen, setWeekShiftModalOpen] = useState(false); // [{ level, key, value }]
   const [statChoiceQueue, setStatChoiceQueue] = useState([]);
   const [notifPermission, setNotifPermission] = useState("default");
   const [swReg, setSwReg] = useState(null); // pending level-up choices
@@ -925,12 +932,12 @@ export default function App() {
     saveTimer.current = setTimeout(async () => {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
-          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, historyDay, historyDiff,
+          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff,
           habits, habitPerfectDayDate, calView, pendingBattle, battleState,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, historyDay, historyDiff, habits, habitPerfectDayDate, calView, pendingBattle, battleState, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff, habits, habitPerfectDayDate, calView, pendingBattle, battleState, loaded]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -961,6 +968,8 @@ export default function App() {
         setInventory(data.inventory?.length ? data.inventory : ["theme_ember", "wpn_sword"]);
         setEquipped(data.equipped ? { ...DEFAULT_GEAR, ...data.equipped } : { ...DEFAULT_GEAR });
         setPlayerStats(data.playerStats || { bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+        setStatHistory(data.statHistory || []);
+        setShifts(data.shifts || []);
         setPendingBattle(data.pendingBattle || null);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
@@ -983,6 +992,20 @@ export default function App() {
   useEffect(() => {
     if ("Notification" in window) setNotifPermission(Notification.permission);
   }, []);
+
+  // ---- Recompute playerStats when level changes (handles de-levelling) ----
+  useEffect(() => {
+    if (!loaded || statHistory.length === 0) return;
+    const currentLevel = levelFromXP(totalXP).level;
+    const validHistory = statHistory.filter((e) => e.level <= currentLevel);
+    if (validHistory.length === statHistory.length) return; // nothing to strip
+    const newStats = validHistory.reduce((acc, e) => ({
+      ...acc,
+      [e.key]: (acc[e.key] || 0) + e.value,
+    }), { bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+    setStatHistory(validHistory);
+    setPlayerStats(newStats);
+  }, [totalXP, loaded]);
 
   // ---- Service Worker registration ----
   useEffect(() => {
@@ -1206,7 +1229,14 @@ export default function App() {
     if (!trimmed) return;
     setDumpError(false);
     setDumpParsing(true);
-    parseBrainDump(trimmed, today)
+    // Build shift context for the next 14 days
+    const upcomingShifts = shifts
+      .filter((s) => s.date >= today)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(0, 14)
+      .map((s) => `${s.date}: ${s.startTime}–${s.endTime}`)
+      .join(", ");
+    parseBrainDump(trimmed, today, upcomingShifts)
       .then((items) => {
         setQuests((qs) => [...items.map((it) => ({ id: Date.now() + Math.random(), title: it.title, difficulty: it.difficulty, xp: xpFor(it.difficulty), reason: it.reason || null, estMinutes: it.estMinutes, date: it.date, recurring: null, completed: false, completedAt: null })), ...qs]);
         setDumpText("");
@@ -1388,6 +1418,8 @@ export default function App() {
     setPendingBattle(null);
     setBattleState(null);
     setPlayerStats({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+    setStatHistory([]);
+    setShifts([]);
     setStatChoiceQueue([]);
     setHabits([
       { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
@@ -1609,6 +1641,8 @@ export default function App() {
     setPendingBattle(null);
     setBattleState(null);
     setPlayerStats({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+    setStatHistory([]);
+    setShifts([]);
     setStatChoiceQueue([]);
   }
 
@@ -1748,6 +1782,7 @@ export default function App() {
     const isToday = date === today;
     const isSelected = date === selectedDate;
     const dayQuests = questsForDate(date);
+    const dayShifts = shifts.filter((s) => s.date === date);
     const d = parseLocalDate(date);
     const dayName = d.toLocaleDateString(undefined, { weekday: narrow ? "narrow" : "short" });
     const dayNum = d.getDate();
@@ -1755,17 +1790,28 @@ export default function App() {
 
     return (
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderRight: "1px solid #2C3947" }}>
-        <div onClick={() => { setSelectedDate(date); if (calView === "month") setCalView("day"); }}
-          style={{ padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #2C3947", cursor: "pointer", background: isSelected ? accent + "22" : "transparent" }}>
-          <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{dayName}</div>
-          <div style={{ width: 24, height: 24, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto 0", cursor: "pointer" }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: isToday ? "#1B2430" : isCurrentMonth ? "#EDE4D3" : "#4A5563" }}>{dayNum}</span>
+        <div style={{ padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #2C3947", background: isSelected ? accent + "22" : "transparent" }}>
+          <div onClick={() => { setSelectedDate(date); if (calView === "month") setCalView("day"); }} style={{ cursor: "pointer" }}>
+            <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{dayName}</div>
+            <div style={{ width: 24, height: 24, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto 0" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: isToday ? "#1B2430" : isCurrentMonth ? "#EDE4D3" : "#4A5563" }}>{dayNum}</span>
+            </div>
           </div>
+
         </div>
         <div style={{ flex: 1, padding: "4px 3px", overflowY: "auto", maxHeight: 300 }}
           onClick={() => { setAddDate(date); setAddModalOpen(true); }}>
+          {dayShifts.map((s) => (
+            <div key={s.id}
+              style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 4, padding: "4px 5px", marginBottom: 3 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.3 }}>Shift</div>
+              <div style={{ fontSize: 9, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>
+                {formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}
+              </div>
+            </div>
+          ))}
           {dayQuests.map((q) => <QuestDot key={q.id} q={q} />)}
-          {dayQuests.length === 0 && <div style={{ height: "100%", minHeight: 40 }} />}
+          {dayQuests.length === 0 && dayShifts.length === 0 && <div style={{ height: "100%", minHeight: 40 }} />}
         </div>
       </div>
     );
@@ -1927,6 +1973,30 @@ export default function App() {
   }
 
 
+  // ---- Shifts ----
+  function addShifts(newShifts) {
+    // newShifts = [{ date, startTime, endTime }]
+    setShifts((s) => {
+      // Remove any existing shifts for these dates, then add new ones
+      const dates = new Set(newShifts.map((x) => x.date));
+      const kept = s.filter((x) => !dates.has(x.date));
+      const added = newShifts.filter((x) => x.startTime && x.endTime).map((x) => ({ id: Date.now() + Math.random(), date: x.date, startTime: x.startTime, endTime: x.endTime }));
+      return [...kept, ...added];
+    });
+    setWeekShiftModalOpen(false);
+  }
+  function deleteShift(id) {
+    setShifts((s) => s.filter((x) => x.id !== id));
+  }
+  function formatShiftTime(t) {
+    // t = "HH:MM", return "9:00am" style
+    const [h, m] = t.split(":").map(Number);
+    const ampm = h >= 12 ? "pm" : "am";
+    const hour = h % 12 || 12;
+    return `${hour}${m > 0 ? `:${String(m).padStart(2,"0")}` : ""}${ampm}`;
+  }
+
+
   // ---- Render ----
   return (
     <div className="safe-top safe-bottom" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 60 }}>
@@ -1980,13 +2050,23 @@ export default function App() {
       {statChoiceQueue.length > 0 && (() => {
         const pending = statChoiceQueue[0];
         const choices = [
-          { key: "bonusHp",   label: "❤ Health",      sub: "+15 max HP",          apply: (s) => ({ ...s, bonusHp: (s.bonusHp||0) + 15 }) },
-          { key: "bonusDef",  label: "🛡 Defense",     sub: "+2 DEF",              apply: (s) => ({ ...s, bonusDef: (s.bonusDef||0) + 2 }) },
-          { key: "bonusAtk",  label: "⚔ Damage",      sub: "+1 base ATK",         apply: (s) => ({ ...s, bonusAtk: (s.bonusAtk||0) + 1 }) },
-          { key: "bonusCrit", label: "💥 Critical",    sub: "+1.5% crit chance",   apply: (s) => ({ ...s, bonusCrit: (s.bonusCrit||0) + 0.015 }) },
+          { key: "bonusHp",   label: "❤ Health",      sub: "+15 max HP",          value: 15,    apply: (s) => ({ ...s, bonusHp: (s.bonusHp||0) + 15 }) },
+          { key: "bonusDef",  label: "🛡 Defense",     sub: "+2 DEF",              value: 2,     apply: (s) => ({ ...s, bonusDef: (s.bonusDef||0) + 2 }) },
+          { key: "bonusAtk",  label: "⚔ Damage",      sub: "+1 base ATK",         value: 1,     apply: (s) => ({ ...s, bonusAtk: (s.bonusAtk||0) + 1 }) },
+          { key: "bonusCrit", label: "💥 Critical",    sub: "+1.5% crit chance",   value: 0.015, apply: (s) => ({ ...s, bonusCrit: (s.bonusCrit||0) + 0.015 }) },
         ];
         function pick(choice) {
-          setPlayerStats((s) => choice.apply(s));
+          const entry = { level: pending.level, key: choice.key, value: choice.value };
+          setStatHistory((h) => {
+            const newHistory = [...h, entry];
+            // Recompute playerStats from full history
+            const newStats = newHistory.reduce((acc, e) => ({
+              ...acc,
+              [e.key]: (acc[e.key] || 0) + e.value,
+            }), { bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+            setPlayerStats(newStats);
+            return newHistory;
+          });
           setStatChoiceQueue((q) => q.slice(1));
         }
         return (
@@ -2223,7 +2303,79 @@ export default function App() {
       )}
 
       {/* Quest detail */}
-      {questDetailFor && <QuestDetailModal questId={questDetailFor} />}
+      {/* Shift modal */}
+      {weekShiftModalOpen && (() => {
+        // Build initial state for each day of the current week
+        const weekDates = getWeekDates(calAnchor);
+        const dayEntries = weekDates.map((date) => {
+          const existing = shifts.find((s) => s.date === date);
+          return { date, enabled: !!existing, startTime: existing?.startTime || "09:00", endTime: existing?.endTime || "17:00", label: existing?.label || "" };
+        });
+        let entries = dayEntries.map((e) => ({ ...e }));
+
+        function WeekShiftModal() {
+          const [rows, setRows] = React.useState(entries);
+          function save() {
+            const toSave = rows.filter((r) => r.enabled).map(({ date, startTime, endTime }) => ({ date, startTime, endTime }));
+            addShifts(toSave);
+          }
+          return (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.80)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+              onClick={() => setWeekShiftModalOpen(false)}>
+              <div style={{ background: themePersonality.cardBase, border: `1px solid ${accent}55`, borderRadius: 16, padding: 20, width: "100%", maxWidth: 380, maxHeight: "90vh", overflowY: "auto" }}
+                onClick={(e) => e.stopPropagation()}>
+                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Set Week Shifts</h3>
+                <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 16px" }}>Toggle days you're working and set times.</p>
+                {rows.map((row, i) => (
+                  <div key={row.date} style={{ marginBottom: 10, background: row.enabled ? accent + "10" : "#141C27", border: `1px solid ${row.enabled ? accent + "44" : "#2C3947"}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.15s" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: row.enabled ? 10 : 0 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: row.enabled ? accent : "#8A8578" }}>
+                        {parseLocalDate(row.date).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })}
+                      </span>
+                      <div onClick={() => setRows((r) => r.map((x, j) => j === i ? { ...x, enabled: !x.enabled } : x))}
+                        style={{ width: 36, height: 20, borderRadius: 10, background: row.enabled ? accent : "#2C3947", cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
+                        <div style={{ position: "absolute", top: 3, left: row.enabled ? 18 : 3, width: 14, height: 14, borderRadius: "50%", background: "#EDE4D3", transition: "left 0.2s" }} />
+                      </div>
+                    </div>
+                    {row.enabled && (
+                      <>
+                        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>Start</p>
+                            <input type="time" value={row.startTime}
+                              onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))}
+                              style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>End</p>
+                            <input type="time" value={row.endTime}
+                              onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))}
+                              style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
+                          </div>
+                        </div>
+
+                      </>
+                    )}
+                  </div>
+                ))}
+                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                  <button onClick={save} className="qlog-btn"
+                    style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>
+                    Save Shifts
+                  </button>
+                  <button onClick={() => setWeekShiftModalOpen(false)} className="qlog-btn"
+                    style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "11px 14px", fontSize: 13, color: "#8A8578", cursor: "pointer" }}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        }
+        return <WeekShiftModal key={calAnchor} />;
+      })()}
+
+            {questDetailFor && <QuestDetailModal questId={questDetailFor} />}
 
       {deleteSeriesPromptFor && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
@@ -2390,10 +2542,13 @@ export default function App() {
               ))}
             </div>
           </div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "#8A8578", paddingLeft: 2 }}>
-            {calView === "day" && parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
-            {calView === "week" && weekLabel(calAnchor)}
-            {calView === "month" && monthLabel(calAnchor)}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#8A8578" }}>
+              {calView === "day" && parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+              {calView === "week" && weekLabel(calAnchor)}
+              {calView === "month" && monthLabel(calAnchor)}
+            </div>
+            <button onClick={() => setWeekShiftModalOpen(true)} className="qlog-btn" style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6, border: `1px solid ${accent}44`, background: accent + "18", color: accent, cursor: "pointer" }}>⏱ Shifts</button>
           </div>
         </div>
 
@@ -2412,10 +2567,19 @@ export default function App() {
               <span style={{ fontSize: 13, fontWeight: 700, color: calAnchor === today ? accent : "#EDE4D3" }}>
                 {parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
               </span>
-              <button onClick={() => { setAddDate(calAnchor); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: accent, border: "none", borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}><Plus size={12} /> Add</button>
+              <div style={{ display: "flex", gap: 6 }}>
+<button onClick={() => { setAddDate(calAnchor); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: accent, border: "none", borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}><Plus size={12} /> Add</button>
+              </div>
             </div>
             <div style={{ padding: 10, minHeight: 200 }}>
-              {questsForDate(calAnchor).length === 0
+              {shifts.filter((s) => s.date === calAnchor).map((s) => (
+                <div key={s.id}
+                  style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 6, padding: "8px 10px", marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>Work Shift</div>
+                  <div style={{ fontSize: 12, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace", marginTop: 2 }}>{formatShiftTime(s.startTime)} – {formatShiftTime(s.endTime)}</div>
+                </div>
+              ))}
+              {questsForDate(calAnchor).length === 0 && shifts.filter((s) => s.date === calAnchor).length === 0
                 ? <div style={{ textAlign: "center", padding: "40px 0", color: "#3F4B58", fontSize: 12 }}>No quests — tap Add to plan your day</div>
                 : questsForDate(calAnchor).map((q) => <QuestDot key={q.id} q={q} />)
               }
@@ -2431,12 +2595,15 @@ export default function App() {
                 const isToday = date === today;
                 const count = quests.filter((q) => q.date === date && !q.completed).length;
                 return (
-                  <div key={date} onClick={() => { setCalAnchor(date); setCalView("day"); }} style={{ flex: 1, padding: "8px 4px", textAlign: "center", cursor: "pointer", borderRight: "1px solid #2C3947", background: date === selectedDate ? accent + "22" : "transparent" }}>
-                    <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
-                    <div style={{ width: 22, height: 22, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto" }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
+                  <div key={date} style={{ flex: 1, padding: "6px 2px", textAlign: "center", borderRight: "1px solid #2C3947", background: date === selectedDate ? accent + "22" : "transparent" }}>
+                    <div onClick={() => { setCalAnchor(date); setCalView("day"); }} style={{ cursor: "pointer" }}>
+                      <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
+                      </div>
+                      {count > 0 && <div style={{ width: 6, height: 6, borderRadius: "50%", background: accent, margin: "2px auto 0" }} />}
                     </div>
-                    {count > 0 && <div style={{ width: 6, height: 6, borderRadius: "50%", background: accent, margin: "2px auto 0" }} />}
+
                   </div>
                 );
               })}
@@ -2444,15 +2611,23 @@ export default function App() {
             <div style={{ display: "flex" }}>
               {getWeekDates(calAnchor).map((date) => {
                 const dayQuests = questsForDate(date);
+                const dayShifts = shifts.filter((s) => s.date === date);
                 const isOver = dragOverDate === date;
                 return (
                   <div key={date}
                     onDragOver={(e) => { e.preventDefault(); setDragOverDate(date); }}
                     onDragLeave={() => setDragOverDate((d) => d === date ? null : d)}
                     onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); }}
-                    style={{ flex: 1, borderRight: "1px solid #2C3947", padding: "6px 4px", minHeight: 160, background: isOver ? accent + "18" : "transparent", transition: "background 0.1s ease" }}
+                    style={{ flex: 1, borderRight: "1px solid #2C3947", padding: "4px 3px", minHeight: 160, background: isOver ? accent + "18" : "transparent", transition: "background 0.1s ease" }}
                     onClick={(e) => { if (e.target === e.currentTarget) { setAddDate(date); setAddModalOpen(true); } }}>
-                    {dayQuests.length === 0
+                    {dayShifts.map((s) => (
+                      <div key={s.id}
+                        style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 4, padding: "3px 4px", marginBottom: 3 }}>
+                        <div style={{ fontSize: 8, fontWeight: 700, color: accent, textTransform: "uppercase" }}>Shift</div>
+                        <div style={{ fontSize: 8, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>{formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}</div>
+                      </div>
+                    ))}
+                    {dayQuests.length === 0 && dayShifts.length === 0
                       ? <div style={{ height: "100%", minHeight: 60 }} onClick={() => { setAddDate(date); setAddModalOpen(true); }} />
                       : dayQuests.map((q) => <QuestDot key={q.id} q={q} />)
                     }
@@ -2483,6 +2658,7 @@ export default function App() {
                   const done = dayQuests.filter((q) => q.completed).length;
                   const hasOverdue = date < today && active > 0;
                   const isOver = dragOverDate === date;
+                  const dayShifts = shifts.filter((s) => s.date === date);
                   return (
                     <div key={date}
                       onDragOver={(e) => { e.preventDefault(); setDragOverDate(date); }}
@@ -2493,6 +2669,11 @@ export default function App() {
                       <div style={{ width: 20, height: 20, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
                         <span style={{ fontSize: 11, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
                       </div>
+                      {dayShifts.map((s) => (
+                        <div key={s.id} style={{ background: accent + "22", borderLeft: `2px solid ${accent}`, borderRadius: 3, padding: "1px 3px", marginBottom: 2, fontSize: 8, color: accent, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}
+                        </div>
+                      ))}
                       {active > 0 && <div style={{ fontSize: 9, fontWeight: 700, color: hasOverdue ? "#C1652B" : accent, lineHeight: 1.4 }}>{hasOverdue ? "⚠ " : ""}{active} quest{active !== 1 ? "s" : ""}</div>}
                       {done > 0 && <div style={{ fontSize: 9, color: "#4C9A6A", lineHeight: 1.4 }}>✓ {done}</div>}
                       {active > 0 && (
