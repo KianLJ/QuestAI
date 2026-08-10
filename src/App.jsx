@@ -812,7 +812,7 @@ export default function App() {
   const [levelUp, setLevelUp] = useState(null);
   const [playerStats, setPlayerStats] = useState({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
   const [statChoiceQueue, setStatChoiceQueue] = useState([]);
-  const [notifPermission, setNotifPermission] = useState(() => typeof Notification !== "undefined" ? Notification.permission : "default");
+  const [notifPermission, setNotifPermission] = useState("default");
   const [swReg, setSwReg] = useState(null); // pending level-up choices
   const [streakBanner, setStreakBanner] = useState(null);
   const [bossBanner, setBossBanner] = useState(null);
@@ -979,6 +979,11 @@ export default function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [focus?.running, focus?.questId]);
+  // ---- Sync notification permission state on load ----
+  useEffect(() => {
+    if ("Notification" in window) setNotifPermission(Notification.permission);
+  }, []);
+
   // ---- Service Worker registration ----
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -2323,12 +2328,7 @@ export default function App() {
           <div style={{ flex: "1 1 200px", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
             <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}><Plus size={15} /> Add Quest</button>
             <button onClick={() => setDumpModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: "pointer" }}><FileText size={14} /> Brain Dump</button>
-            {"Notification" in window && notifPermission !== "granted" && (
-              <button onClick={requestNotifPermission} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: `1px solid ${accent}55`, borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: accent, cursor: "pointer" }}>🔔 Enable reminders</button>
-            )}
-            {"Notification" in window && notifPermission === "granted" && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: 11, color: "#4C9A6A", padding: "9px 0" }}>🔔 Reminders on</div>
-            )}
+
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => setStatsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><BarChart2 size={14} /> Stats</button>
               <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /> Settings</button>
@@ -2702,6 +2702,28 @@ export default function App() {
                 <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
                 <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Bonuses add together, then apply to the base XP. Beat the focus timer clock for an extra +25% on top.</p>
               </div>
+
+              {/* Notifications */}
+              {"Notification" in window && (
+                <>
+                  <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>REMINDERS</p>
+                  <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}>
+                    <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 10px" }}>
+                      {notifPermission === "granted" ? "Reminders are enabled. You'll get nudges for habits, overdue tasks and your weekly battle." : "Get reminded about habits, overdue tasks and your weekly battle."}
+                    </p>
+                    {notifPermission === "denied" && (
+                      <p style={{ fontSize: 11, color: "#8A2E44", margin: "0 0 10px" }}>Notifications are blocked in your browser settings. Enable them there first, then come back here.</p>
+                    )}
+                    {notifPermission !== "denied" && (
+                      <button onClick={async () => {
+                        await requestNotifPermission();
+                      }} className="qlog-btn" style={{ width: "100%", background: notifPermission === "granted" ? "#1B2430" : accent, border: `1px solid ${notifPermission === "granted" ? "#33414F" : accent}`, borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: notifPermission === "granted" ? "#8A8578" : "#1B2430", cursor: "pointer" }}>
+                        {notifPermission === "granted" ? "🔔 Re-register reminders" : "🔔 Enable reminders"}
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
 
               {/* Clear all data */}
               <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>DANGER ZONE</p>
