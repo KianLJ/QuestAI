@@ -94,16 +94,8 @@ export default async function handler(req, res) {
 
   const notifications = [];
 
-  // Debug — log first habit so we can see its structure
-  if (habits.length > 0) {
-    console.log("Sample habit:", JSON.stringify(habits[0]));
-    console.log("Today:", today, "dayKey:", dayKey);
-  }
-
   // ---- Habit reminder — midday and evening every day ----
-  const incompleteHabits = habits.filter(
-    (h) => h.days?.includes(dayKey) && !h.completedDates?.includes(today)
-  );
+  const incompleteHabits = habits.filter((h) => h.lastCompletedDate !== today);
   if (incompleteHabits.length > 0) {
     if (isMidday) {
       notifications.push({
