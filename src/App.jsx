@@ -979,6 +979,19 @@ export default function App() {
   const rank = rankForLevel(level);
   const nextMilestone = MILESTONE_LEVELS.find((m) => level < m);
   const accent = (ITEM_CATALOGUE.find((i) => i.id === equipped.theme))?.value || "#C9A227";
+
+  // Blend difficulty colours toward the theme accent (18% keeps them readable)
+  const themedDifficulties = DIFFICULTIES.map((d) => {
+    const parse = (h) => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+    const toHex = (n) => n.toString(16).padStart(2,'0');
+    const [br,bg,bb] = parse(d.color);
+    const [tr,tg,tb] = parse(accent);
+    const blend = 0.18;
+    const r = Math.round(br + (tr-br)*blend);
+    const g = Math.round(bg + (tg-bg)*blend);
+    const b = Math.round(bb + (tb-bb)*blend);
+    return { ...d, color: `#${toHex(r)}${toHex(g)}${toHex(b)}` };
+  });
   const today = todayStr();
   const activeStats = computeActiveStats(equipped);
   const activeAura = equipped.aura ? ITEM_CATALOGUE.find((i) => i.id === equipped.aura) : null;
@@ -999,22 +1012,6 @@ export default function App() {
     return { bgBase, cardBase, deepBase, xpGlow, borderCol };
   })();
 
-  // Blend difficulty colours toward the theme accent (20% blend keeps them readable)
-  const themedDifficulties = (() => {
-    function blendHex(base, tint, amount) {
-      const parse = (h) => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
-      const toHex = (n) => n.toString(16).padStart(2,'0');
-      const [br,bg,bb] = parse(base);
-      const [tr,tg,tb] = parse(tint);
-      const r = Math.round(br + (tr - br) * amount);
-      const g = Math.round(bg + (tg - bg) * amount);
-      const b = Math.round(bb + (tb - bb) * amount);
-      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-    }
-    // Only blend if accent is meaningfully different from the base neutrals
-    const blend = 0.18;
-    return themedDifficulties.map((d) => ({ ...d, color: blendHex(d.color, accent, blend) }));
-  })();
   const todayInView = calView === "day" ? calAnchor === today
     : calView === "week" ? getWeekDates(calAnchor).includes(today)
     : (() => { const d = parseLocalDate(calAnchor); return d.getFullYear() === parseLocalDate(today).getFullYear() && d.getMonth() === parseLocalDate(today).getMonth(); })();
