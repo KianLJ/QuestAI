@@ -1,4 +1,4 @@
-// QuestAI Service Worker
+// Quest Log Service Worker
 const CACHE_NAME = "questai-v1";
 
 // ---- Install & Activate ----
@@ -15,9 +15,9 @@ self.addEventListener("push", (e) => {
   if (!e.data) return;
   let payload;
   try { payload = e.data.json(); }
-  catch { payload = { title: "QuestAI", body: e.data.text() }; }
+  catch { payload = { title: "Quest Log", body: e.data.text() }; }
 
-  const { title = "QuestAI", body = "", tag = "questai", url = "/" } = payload;
+  const { title = "Quest Log", body = "", tag = "questai", url = "/" } = payload;
 
   e.waitUntil(
     self.registration.showNotification(title, {

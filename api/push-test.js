@@ -96,7 +96,7 @@ export default async function handler(req, res) {
     const subscription = { endpoint, keys: { p256dh, auth } };
 
     await webpush.sendNotification(subscription, JSON.stringify({
-      title: "⚔ QuestAI test",
+      title: "⚔ Quest Log test",
       body: "Notifications are working! Reminders for tasks, habits and battles are active.",
       tag: "push-test",
       url: "/",

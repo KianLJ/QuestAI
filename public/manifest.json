@@ -1,6 +1,6 @@
 {
-  "name": "QuestAI",
-  "short_name": "QuestAI",
+  "name": "Quest Log",
+  "short_name": "Quest Log",
   "description": "Gamified productivity — quests, habits, gear and boss battles",
   "start_url": "/",
   "display": "standalone",
