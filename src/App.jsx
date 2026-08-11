@@ -770,6 +770,70 @@ OUTPUT FORMAT (a JSON array, nothing else):
     .map((it) => ({ title: String(it.title).slice(0, 120), difficulty: it.difficulty, estMinutes: Math.min(120, Math.max(1, Math.round(Number(it.estMinutes) || 15))) }));
 }
 
+// ---- WeekShiftModal — standalone component to avoid nested component crash ----
+function WeekShiftModal({ weekDates, shifts, accent, themePersonality, onSave, onClose, formatShiftTime, parseLocalDate }) {
+  const [rows, setRows] = useState(() =>
+    weekDates.map((date) => {
+      const existing = shifts.find((s) => s.date === date);
+      return { date, enabled: !!existing, startTime: existing?.startTime || "09:00", endTime: existing?.endTime || "17:00" };
+    })
+  );
+
+  function save() {
+    onSave(rows.filter((r) => r.enabled).map(({ date, startTime, endTime }) => ({ date, startTime, endTime })));
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.80)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+      onClick={onClose}>
+      <div style={{ background: themePersonality.cardBase, border: `1px solid ${accent}55`, borderRadius: 16, padding: 20, width: "100%", maxWidth: 380, maxHeight: "90vh", overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Set Week Shifts</h3>
+        <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 16px" }}>Toggle days you're working and set times.</p>
+        {rows.map((row, i) => (
+          <div key={row.date} style={{ marginBottom: 10, background: row.enabled ? accent + "10" : "#141C27", border: `1px solid ${row.enabled ? accent + "44" : "#2C3947"}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.15s" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: row.enabled ? 10 : 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: row.enabled ? accent : "#8A8578" }}>
+                {parseLocalDate(row.date).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })}
+              </span>
+              <div onClick={() => setRows((r) => r.map((x, j) => j === i ? { ...x, enabled: !x.enabled } : x))}
+                style={{ width: 36, height: 20, borderRadius: 10, background: row.enabled ? accent : "#2C3947", cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
+                <div style={{ position: "absolute", top: 3, left: row.enabled ? 18 : 3, width: 14, height: 14, borderRadius: "50%", background: "#EDE4D3", transition: "left 0.2s" }} />
+              </div>
+            </div>
+            {row.enabled && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>Start</p>
+                  <input type="time" value={row.startTime}
+                    onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))}
+                    style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>End</p>
+                  <input type="time" value={row.endTime}
+                    onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))}
+                    style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          <button onClick={save} className="qlog-btn"
+            style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>
+            Save Shifts
+          </button>
+          <button onClick={onClose} className="qlog-btn"
+            style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "11px 14px", fontSize: 13, color: "#8A8578", cursor: "pointer" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // ---- State ----
   const [quests, setQuests] = useState([]);
@@ -2304,76 +2368,20 @@ export default function App() {
 
       {/* Quest detail */}
       {/* Shift modal */}
-      {weekShiftModalOpen && (() => {
-        // Build initial state for each day of the current week
-        const weekDates = getWeekDates(calAnchor);
-        const dayEntries = weekDates.map((date) => {
-          const existing = shifts.find((s) => s.date === date);
-          return { date, enabled: !!existing, startTime: existing?.startTime || "09:00", endTime: existing?.endTime || "17:00", label: existing?.label || "" };
-        });
-        let entries = dayEntries.map((e) => ({ ...e }));
-
-        function WeekShiftModal() {
-          const [rows, setRows] = React.useState(entries);
-          function save() {
-            const toSave = rows.filter((r) => r.enabled).map(({ date, startTime, endTime }) => ({ date, startTime, endTime }));
-            addShifts(toSave);
-          }
-          return (
-            <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.80)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-              onClick={() => setWeekShiftModalOpen(false)}>
-              <div style={{ background: themePersonality.cardBase, border: `1px solid ${accent}55`, borderRadius: 16, padding: 20, width: "100%", maxWidth: 380, maxHeight: "90vh", overflowY: "auto" }}
-                onClick={(e) => e.stopPropagation()}>
-                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Set Week Shifts</h3>
-                <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 16px" }}>Toggle days you're working and set times.</p>
-                {rows.map((row, i) => (
-                  <div key={row.date} style={{ marginBottom: 10, background: row.enabled ? accent + "10" : "#141C27", border: `1px solid ${row.enabled ? accent + "44" : "#2C3947"}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.15s" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: row.enabled ? 10 : 0 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: row.enabled ? accent : "#8A8578" }}>
-                        {parseLocalDate(row.date).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })}
-                      </span>
-                      <div onClick={() => setRows((r) => r.map((x, j) => j === i ? { ...x, enabled: !x.enabled } : x))}
-                        style={{ width: 36, height: 20, borderRadius: 10, background: row.enabled ? accent : "#2C3947", cursor: "pointer", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
-                        <div style={{ position: "absolute", top: 3, left: row.enabled ? 18 : 3, width: 14, height: 14, borderRadius: "50%", background: "#EDE4D3", transition: "left 0.2s" }} />
-                      </div>
-                    </div>
-                    {row.enabled && (
-                      <>
-                        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>Start</p>
-                            <input type="time" value={row.startTime}
-                              onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))}
-                              style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>End</p>
-                            <input type="time" value={row.endTime}
-                              onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))}
-                              style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
-                          </div>
-                        </div>
-
-                      </>
-                    )}
-                  </div>
-                ))}
-                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                  <button onClick={save} className="qlog-btn"
-                    style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>
-                    Save Shifts
-                  </button>
-                  <button onClick={() => setWeekShiftModalOpen(false)} className="qlog-btn"
-                    style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "11px 14px", fontSize: 13, color: "#8A8578", cursor: "pointer" }}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        }
-        return <WeekShiftModal key={calAnchor} />;
-      })()}
+      {weekShiftModalOpen && (
+        <WeekShiftModal
+          weekDates={getWeekDates(calAnchor)}
+          shifts={shifts}
+          accent={accent}
+          themePersonality={themePersonality}
+          onSave={(newShifts) => {
+            addShifts(newShifts);
+          }}
+          onClose={() => setWeekShiftModalOpen(false)}
+          formatShiftTime={formatShiftTime}
+          parseLocalDate={parseLocalDate}
+        />
+      )}
 
             {questDetailFor && <QuestDetailModal questId={questDetailFor} />}
 
