@@ -1970,7 +1970,6 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={() => setCollectionOpen(true)} className="qlog-btn" style={{ fontSize: 18, background: "none", border: "none", cursor: "pointer", padding: 4 }} title="Collection">🎒</button>
             <button onClick={() => setCrateModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
           </div>
         </div>
@@ -2136,51 +2135,53 @@ export default function App() {
 
         {calView === "week" && (
           <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
-            <div style={{ display: "flex", borderBottom: "1px solid #2C3947" }}>
-              {getWeekDates(calAnchor).map((date) => {
-                const d = parseLocalDate(date);
-                const isToday = date === today;
-                const count = quests.filter((q) => q.date === date && !q.completed).length;
-                return (
-                  <div key={date} style={{ flex: 1, padding: "6px 2px", textAlign: "center", borderRight: "1px solid #2C3947", background: date === selectedDate ? accent + "22" : "transparent" }}>
-                    <div onClick={() => { setCalAnchor(date); setCalView("day"); }} style={{ cursor: "pointer" }}>
-                      <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
-                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto" }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
+            <div style={{ overflowX: "auto" }}>
+              <div style={{ display: "flex", borderBottom: "1px solid #2C3947", minWidth: 490 }}>
+                {getWeekDates(calAnchor).map((date) => {
+                  const d = parseLocalDate(date);
+                  const isToday = date === today;
+                  const count = quests.filter((q) => q.date === date && !q.completed).length;
+                  return (
+                    <div key={date} style={{ flex: "1 0 70px", padding: "6px 2px", textAlign: "center", borderRight: "1px solid #2C3947", background: date === selectedDate ? accent + "22" : "transparent" }}>
+                      <div onClick={() => { setCalAnchor(date); setCalView("day"); }} style={{ cursor: "pointer" }}>
+                        <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
+                        <div style={{ width: 22, height: 22, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto" }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
+                        </div>
+                        {count > 0 && <div style={{ width: 6, height: 6, borderRadius: "50%", background: accent, margin: "2px auto 0" }} />}
                       </div>
-                      {count > 0 && <div style={{ width: 6, height: 6, borderRadius: "50%", background: accent, margin: "2px auto 0" }} />}
-                    </div>
 
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display: "flex" }}>
-              {getWeekDates(calAnchor).map((date) => {
-                const dayQuests = questsForDate(date);
-                const dayShifts = shifts.filter((s) => s.date === date);
-                const isOver = dragOverDate === date;
-                return (
-                  <div key={date}
-                    onDragOver={(e) => { e.preventDefault(); setDragOverDate(date); }}
-                    onDragLeave={() => setDragOverDate((d) => d === date ? null : d)}
-                    onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); }}
-                    style={{ flex: 1, borderRight: "1px solid #2C3947", padding: "4px 3px", minHeight: 160, background: isOver ? accent + "18" : "transparent", transition: "background 0.1s ease" }}
-                    onClick={(e) => { if (e.target === e.currentTarget) { setAddDate(date); setAddModalOpen(true); } }}>
-                    {dayShifts.map((s) => (
-                      <div key={s.id}
-                        style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 4, padding: "3px 4px", marginBottom: 3 }}>
-                        <div style={{ fontSize: 8, fontWeight: 700, color: accent, textTransform: "uppercase" }}>Shift</div>
-                        <div style={{ fontSize: 8, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>{formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}</div>
-                      </div>
-                    ))}
-                    {dayQuests.length === 0 && dayShifts.length === 0
-                      ? <div style={{ height: "100%", minHeight: 60 }} onClick={() => { setAddDate(date); setAddModalOpen(true); }} />
-                      : dayQuests.map((q) => <QuestDot key={q.id} q={q} />)
-                    }
-                  </div>
-                );
-              })}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ display: "flex", minWidth: 490 }}>
+                {getWeekDates(calAnchor).map((date) => {
+                  const dayQuests = questsForDate(date);
+                  const dayShifts = shifts.filter((s) => s.date === date);
+                  const isOver = dragOverDate === date;
+                  return (
+                    <div key={date}
+                      onDragOver={(e) => { e.preventDefault(); setDragOverDate(date); }}
+                      onDragLeave={() => setDragOverDate((d) => d === date ? null : d)}
+                      onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); moveQuestToDate(id, date); dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); }}
+                      style={{ flex: "1 0 70px", borderRight: "1px solid #2C3947", padding: "4px 3px", minHeight: 160, background: isOver ? accent + "18" : "transparent", transition: "background 0.1s ease" }}
+                      onClick={(e) => { if (e.target === e.currentTarget) { setAddDate(date); setAddModalOpen(true); } }}>
+                      {dayShifts.map((s) => (
+                        <div key={s.id}
+                          style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 4, padding: "3px 4px", marginBottom: 3 }}>
+                          <div style={{ fontSize: 8, fontWeight: 700, color: accent, textTransform: "uppercase" }}>Shift</div>
+                          <div style={{ fontSize: 8, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>{formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}</div>
+                        </div>
+                      ))}
+                      {dayQuests.length === 0 && dayShifts.length === 0
+                        ? <div style={{ height: "100%", minHeight: 60 }} onClick={() => { setAddDate(date); setAddModalOpen(true); }} />
+                        : dayQuests.map((q) => <QuestDot key={q.id} q={q} />)
+                      }
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
@@ -2254,38 +2255,65 @@ export default function App() {
           </div>
         )}
 
-        {/* Daily Habits */}
-        <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 14, marginTop: 12, marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 700 }}>Daily Habits</span>
-            <span style={{ fontSize: 10, color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
+        {/* Daily Habits + Gear */}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, marginBottom: 20 }}>
+          {/* Daily Habits */}
+          <div style={{ flex: "1 1 320px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Daily Habits</span>
+              <span style={{ fontSize: 9, color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 4, marginBottom: 8 }}>
+              {habits.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>No habits yet — add one below.</p>}
+              {habits.map((h) => {
+                const doneToday = h.lastCompletedDate === today;
+                const tier = habitTier(h.streak);
+                return (
+                  <div key={h.id} style={{ position: "relative", display: "flex", alignItems: "center", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 6, padding: "4px 8px" }}>
+                    {!doneToday
+                      ? <button onClick={() => completeHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
+                      : <button onClick={() => uncompleteHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
+                    }
+                    <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
+                    {h.streak > 0 && (
+                      <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
+                        <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
+                      </span>
+                    )}
+                    <button onClick={() => deleteHabit(h.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={11} /></button>
+                    {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 30, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addHabit(newHabitName)} placeholder="Add a habit — e.g. drink water" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", fontSize: 12 }} />
+              <button onClick={() => addHabit(newHabitName)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 8px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={13} color="#1B2430" /></button>
+            </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-            {habits.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No habits yet — add one below.</p>}
-            {habits.map((h) => {
-              const doneToday = h.lastCompletedDate === today;
-              const tier = habitTier(h.streak);
-              return (
-                <div key={h.id} style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
-                  {!doneToday
-                    ? <button onClick={() => completeHabit(h.id)} className="qlog-btn" style={{ width: 18, height: 18, minWidth: 18, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
-                    : <button onClick={() => uncompleteHabit(h.id)} className="qlog-btn" style={{ width: 18, height: 18, minWidth: 18, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={11} color="#141C27" /></button>
-                  }
-                  <span style={{ flex: 1, fontSize: 13, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
-                  {h.streak > 0 && (
-                    <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
-                      <Flame size={11} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
-                    </span>
-                  )}
-                  <button onClick={() => deleteHabit(h.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={12} /></button>
-                  {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 30, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addHabit(newHabitName)} placeholder="Add a habit — e.g. drink water" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "7px 10px", color: "#EDE4D3", fontSize: 13 }} />
-            <button onClick={() => addHabit(newHabitName)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 10px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={14} color="#1B2430" /></button>
+
+          {/* Gear */}
+          <div style={{ flex: "1 1 260px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>⚔ Gear</span>
+              <span onClick={() => { setPickingSlot(null); setCollectionOpen(true); }} style={{ fontSize: 9, color: accent, cursor: "pointer", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {SLOTS.map((slot) => {
+                const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
+                const rar = equippedItem ? RARITIES[equippedItem.rarity] : null;
+                return (
+                  <button key={slot} onClick={() => { setPickingSlot(slot); setCollectionOpen(true); }} className="qlog-btn"
+                    style={{ background: equippedItem ? rar.glow : "#1F2836", border: `1.5px solid ${equippedItem ? rar.color : "#2C3947"}`, borderRadius: 8, padding: "8px 4px", textAlign: "center", cursor: "pointer" }}>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>{SLOT_LABELS[slot]}</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 20, marginBottom: 3 }}>
+                      {equippedItem ? equippedItem.icon(rar.color) : <Plus size={13} color="#33414F" />}
+                    </div>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{equippedItem ? equippedItem.label : "Empty"}</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
