@@ -2296,8 +2296,25 @@ export default function App() {
           <div style={{ flex: "1 1 260px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>⚔ Gear</span>
-              <span onClick={() => { setPickingSlot(null); setCollectionOpen(true); }} style={{ fontSize: 9, color: accent, cursor: "pointer", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
+              <span style={{ fontSize: 9, color: "#5C6773", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
             </div>
+
+            {/* Active stats bar */}
+            <div style={{ background: "#1F2836", border: `1px solid ${activeStats.activeSets.length > 0 ? "#C9A227" : "#2C3947"}`, borderRadius: 8, padding: "7px 9px", marginBottom: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {activeStats.activeSets.length > 0 && activeStats.activeSets.map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  <div style={{ width: 5, height: 5, borderRadius: "50%", background: s.color }} />
+                  <span style={{ fontSize: 9, fontWeight: 700, color: s.color }}>{s.label}</span>
+                </div>
+              ))}
+              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
+              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat}g</span>
+              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#4FA3C9" }}>🛡 {activeStats.defense + (playerStats.bonusDef || 0)}</span>
+              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#8A2E44" }}>❤ {activeStats.maxHealth + (playerStats.bonusHp || 0)}</span>
+              {(activeStats.critChance + (playerStats.bonusCrit || 0)) > 0 && <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#C1652B" }}>💥 {Math.round((activeStats.critChance + (playerStats.bonusCrit || 0)) * 100)}% crit</span>}
+              {(playerStats.bonusAtk || 0) > 0 && <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>+{playerStats.bonusAtk} ATK</span>}
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
               {SLOTS.map((slot) => {
                 const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
@@ -2543,8 +2560,8 @@ export default function App() {
         )}
 
         {/* Collection / Gear Modal */}
-        {collectionOpen && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.85)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }} onClick={() => { if (pickingSlot) { setPickingSlot(null); } else { setCollectionOpen(false); } }}>
+        {collectionOpen && pickingSlot && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.85)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }} onClick={() => { setCollectionOpen(false); setPickingSlot(null); }}>
             <div style={{ background: "#1B2430", border: "1px solid #33414F", borderRadius: 16, width: "100%", maxWidth: 480, maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
 
               {/* Sticky header */}
@@ -2552,45 +2569,21 @@ export default function App() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <div>
                     <h3 style={{ margin: "0 0 2px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>
-                      {pickingSlot ? `Choose ${SLOT_LABELS[pickingSlot]}` : "⚔ Gear & Collection"}
+                      Choose {SLOT_LABELS[pickingSlot]}
                     </h3>
-                    <p style={{ fontSize: 10, color: "#5C6773", margin: 0 }}>
-                      {pickingSlot ? "Tap an item to equip it" : `${inventory.length} / ${ITEM_CATALOGUE.length} items collected`}
-                    </p>
+                    <p style={{ fontSize: 10, color: "#5C6773", margin: 0 }}>Tap an item to equip it</p>
                   </div>
-                  <button onClick={() => pickingSlot ? setPickingSlot(null) : setCollectionOpen(false)}
+                  <button onClick={() => { setCollectionOpen(false); setPickingSlot(null); }}
                     style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "5px 9px", color: "#EDE4D3", cursor: "pointer" }}>
-                    {pickingSlot ? <ChevronLeft size={15} /> : <X size={15} />}
+                    <X size={15} />
                   </button>
                 </div>
-                {/* Collection progress — only on main view */}
-                {!pickingSlot && (
-                  <div style={{ height: 3, background: "#141C27", borderRadius: 2, overflow: "hidden", marginTop: 10 }}>
-                    <div style={{ height: "100%", width: `${(inventory.length / ITEM_CATALOGUE.length) * 100}%`, background: `linear-gradient(90deg, #4C9A6A, ${accent})`, borderRadius: 2 }} />
-                  </div>
-                )}
               </div>
 
-              <div ref={collectionScrollRef} style={{ overflowY: "auto", padding: "14px 18px 20px", flex: 1 }} key={pickingSlot || "main"}>
-
-                {/* Active stats bar */}
-                <div style={{ background: "#232E3D", border: `1px solid ${activeStats.activeSets.length > 0 ? "#C9A227" : "#33414F"}`, borderRadius: 10, padding: "9px 12px", marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                  {activeStats.activeSets.length > 0 && activeStats.activeSets.map((s) => (
-                    <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: s.color }} />
-                      <span style={{ fontSize: 10, fontWeight: 700, color: s.color }}>{s.label}</span>
-                    </div>
-                  ))}
-                  <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
-                  <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat}g</span>
-                  <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: "#4FA3C9" }}>🛡 {activeStats.defense + (playerStats.bonusDef || 0)}</span>
-                  <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: "#8A2E44" }}>❤ {activeStats.maxHealth + (playerStats.bonusHp || 0)}</span>
-                  {(activeStats.critChance + (playerStats.bonusCrit || 0)) > 0 && <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: "#C1652B" }}>💥 {Math.round((activeStats.critChance + (playerStats.bonusCrit || 0)) * 100)}% crit</span>}
-                  {(playerStats.bonusAtk || 0) > 0 && <span style={{ fontSize: 11, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>+{playerStats.bonusAtk} ATK</span>}
-                </div>
+              <div ref={collectionScrollRef} style={{ overflowY: "auto", padding: "14px 18px 20px", flex: 1 }} key={pickingSlot}>
 
                 {/* ---- SLOT PICKER VIEW ---- */}
-                {pickingSlot && (() => {
+                {(() => {
                   const slotItems = ITEM_CATALOGUE
                     .filter((i) => i.slot === pickingSlot)
                     .sort((a, b) => RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity));
@@ -2641,58 +2634,6 @@ export default function App() {
                     </div>
                   );
                 })()}
-
-                {/* ---- MAIN SLOT CARD VIEW ---- */}
-                {!pickingSlot && (
-                  <div>
-                    {/* Gear section */}
-                    <p style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.8 }}>⚔ Gear</p>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 18 }}>
-                      {GEAR_SLOTS.map((slot) => {
-                        const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
-                        const rar = equippedItem ? RARITIES[equippedItem.rarity] : null;
-                        const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === slot).sort((a,b) => RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity));
-                        const ownedCount = slotItems.filter((i) => inventory.includes(i.id)).length;
-                        return (
-                          <button key={slot} onClick={() => setPickingSlot(slot)} className="qlog-btn"
-                            style={{ background: equippedItem ? rar.glow : "#232E3D", border: `1.5px solid ${equippedItem ? rar.color : "#33414F"}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: "pointer", position: "relative" }}>
-                            <div style={{ fontSize: 9, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>{SLOT_LABELS[slot]}</div>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 26, marginBottom: 5 }}>
-                              {equippedItem ? equippedItem.icon(rar.color) : <Plus size={16} color="#33414F" />}
-                            </div>
-                            <div style={{ fontSize: 9, fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", lineHeight: 1.2 }}>{equippedItem ? equippedItem.label : "Empty"}</div>
-                            <div style={{ fontSize: 8, color: "#5C6773", marginTop: 2 }}>{ownedCount}/{slotItems.length}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Cosmetics section */}
-                    <p style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: 0.8 }}>✨ Cosmetics</p>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
-                      {COSMETIC_SLOTS.map((slot) => {
-                        const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
-                        const rar = equippedItem ? RARITIES[equippedItem.rarity] : null;
-                        const slotItems = ITEM_CATALOGUE.filter((i) => i.slot === slot).sort((a,b) => RARITY_ORDER.indexOf(a.rarity) - RARITY_ORDER.indexOf(b.rarity));
-                        const ownedCount = slotItems.filter((i) => inventory.includes(i.id)).length;
-                        return (
-                          <button key={slot} onClick={() => setPickingSlot(slot)} className="qlog-btn"
-                            style={{ background: equippedItem ? rar.glow : "#232E3D", border: `1.5px solid ${equippedItem ? rar.color : "#33414F"}`, borderRadius: 12, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, cursor: "pointer", textAlign: "left" }}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, flexShrink: 0 }}>
-                              {equippedItem ? equippedItem.icon(rar.color) : <Plus size={16} color="#33414F" />}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 9, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.5 }}>{SLOT_LABELS[slot]}</div>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{equippedItem ? equippedItem.label : "None"}</div>
-                              {slot === "theme" && equippedItem && <div style={{ width: 8, height: 8, borderRadius: "50%", background: equippedItem.value, marginTop: 2 }} />}
-                            </div>
-                            <div style={{ fontSize: 8, color: "#5C6773", flexShrink: 0 }}>{ownedCount}/{slotItems.length}</div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
 
               </div>
             </div>
