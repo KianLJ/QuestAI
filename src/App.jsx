@@ -975,9 +975,21 @@ export default function App() {
         }
         setInventory(data.inventory?.length ? data.inventory : ["theme_ember", "wpn_sword"]);
         setEquipped(data.equipped ? { ...DEFAULT_GEAR, ...data.equipped } : { ...DEFAULT_GEAR });
+        setPlayerStats(data.playerStats || { bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
+        setStatHistory(data.statHistory || []);
+        setShifts(data.shifts || []);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
         if (data.calView) setCalView(data.calView);
+        if (data.focus) {
+          const f = data.focus;
+          if (f.running && f.endsAt) {
+            const remaining = Math.floor((f.endsAt - Date.now()) / 1000);
+            setFocus(remaining > 0 ? { ...f, secondsLeft: remaining } : { ...f, secondsLeft: 0, running: false });
+          } else {
+            setFocus(f);
+          }
+        }
       } else {
         setHabits([
           { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
@@ -997,11 +1009,11 @@ export default function App() {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
           quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff,
-          habits, habitPerfectDayDate, calView, pendingBattle, battleState,
+          habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff, habits, habitPerfectDayDate, calView, pendingBattle, battleState, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -1076,13 +1088,6 @@ export default function App() {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("/sw.js").then((reg) => {
       setSwReg(reg);
-      // Restore focus timer from Firestore if endsAt is in the future
-      if (loaded && focus?.endsAt && !focus.running) {
-        const remaining = Math.floor((focus.endsAt - Date.now()) / 1000);
-        if (remaining > 0) {
-          setFocus((f) => f ? { ...f, secondsLeft: remaining, running: true } : f);
-        }
-      }
     }).catch((e) => console.warn("SW registration failed:", e));
   }, [loaded]);
 
