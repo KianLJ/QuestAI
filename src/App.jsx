@@ -1748,10 +1748,6 @@ export default function App() {
   function abandonBattle() {
     setPendingBattle(null);
     setBattleState(null);
-    setPlayerStats({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
-    setStatHistory([]);
-    setShifts([]);
-    setStatChoiceQueue([]);
   }
 
   function simulateBattle() {
