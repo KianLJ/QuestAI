@@ -1095,6 +1095,7 @@ export default function App() {
   useEffect(() => {
     if (!swReg?.active || !focus?.running || !focus?.endsAt) return;
     const q = quests.find((x) => x.id === focus.questId);
+    const questLabel = q ? `"${q.title}"` : "Focus session";
     swReg.active.postMessage({
       type: "SCHEDULE_NOTIFICATION",
       id: "focus-timer",
@@ -1104,11 +1105,49 @@ export default function App() {
       url: "/",
       fireAt: focus.endsAt,
     });
+    const warnAt = focus.endsAt - 5 * 60 * 1000;
+    if (warnAt > Date.now()) {
+      swReg.active.postMessage({
+        type: "SCHEDULE_NOTIFICATION",
+        id: "focus-timer-warning",
+        title: "⏱ 5 minutes left",
+        body: `${questLabel} wraps up in 5 minutes.`,
+        tag: "focus-timer-warning",
+        url: "/",
+        fireAt: warnAt,
+      });
+    } else {
+      swReg.active.postMessage({ type: "CANCEL_NOTIFICATION", id: "focus-timer-warning" });
+    }
     return () => {
       swReg.active?.postMessage({ type: "CANCEL_NOTIFICATION", id: "focus-timer" });
+      swReg.active?.postMessage({ type: "CANCEL_NOTIFICATION", id: "focus-timer-warning" });
     };
   }, [focus?.running, focus?.endsAt, swReg]);
 
+  // ---- Keep screen awake while the focus timer is enlarged on screen ----
+  useEffect(() => {
+    if (!focusOpen || !("wakeLock" in navigator)) return;
+    let lock = null;
+    let cancelled = false;
+    const acquire = async () => {
+      try {
+        lock = await navigator.wakeLock.request("screen");
+      } catch (e) {
+        console.warn("wake lock failed:", e);
+      }
+    };
+    acquire();
+    const onVisibility = () => {
+      if (!cancelled && document.visibilityState === "visible" && !lock) acquire();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      lock?.release().catch(() => {});
+    };
+  }, [focusOpen]);
 
   const { level, into, need } = levelFromXP(totalXP);
   const rank = rankForLevel(level);
