@@ -470,7 +470,6 @@ export default function App() {
   const [isDragging, setIsDragging] = useState(false);
   const dragIdRef = useRef(null);
   const [confettiPieces, setConfettiPieces] = useState([]);
-  const longPressTimer = useRef(null);
   const saveTimer = useRef(null);
 
   // ---- Load ----
@@ -1352,81 +1351,22 @@ export default function App() {
   function QuestDot({ q }) {
     const diff = themedDifficulties.find((d) => d.key === q.difficulty);
     const isMissed = !q.completed && q.missedPenalty;
-    const startXRef = useRef(null);
-    const [swipeOffset, setSwipeOffset] = useState(0);
-    const [swipeAction, setSwipeAction] = useState(null);
-    const isDotTouchRef = useRef(false);
-
-    function onTouchStart(e) {
-      if (isDotTouchRef.current) return;
-      startXRef.current = e.touches[0].clientX;
-      setSwipeOffset(0);
-      setSwipeAction(null);
-      // Long-press: 600ms hold triggers delete
-      longPressTimer.current = setTimeout(() => {
-        startXRef.current = null; // cancel swipe
-        deleteQuest(q.id);
-      }, 600);
-    }
-    function onTouchMove(e) {
-      if (isDotTouchRef.current || startXRef.current === null) return;
-      const dx = e.touches[0].clientX - startXRef.current;
-      if (Math.abs(dx) > 4 && longPressTimer.current) {
-        clearTimeout(longPressTimer.current); // moved — not a long press
-        longPressTimer.current = null;
-      }
-      if (Math.abs(dx) < 4) return;
-      const clamped = Math.max(-80, Math.min(80, dx));
-      setSwipeOffset(clamped);
-      setSwipeAction(clamped > 36 ? "complete" : clamped < -36 ? "delete" : null);
-    }
-    function onTouchEnd() {
-      if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
-      if (isDotTouchRef.current) { isDotTouchRef.current = false; return; }
-      if (startXRef.current === null) return; // was a long press, already handled
-      if (swipeAction === "complete" && !q.completed) completeQuest(q.id);
-      else if (swipeAction === "delete") deleteQuest(q.id);
-      setSwipeOffset(0);
-      setSwipeAction(null);
-      startXRef.current = null;
-    }
 
     return (
       <div style={{ position: "relative", marginBottom: 2, borderRadius: 4, overflow: "hidden", height: 22 }}>
-        {/* Revealed background — green on right, red on left */}
-        <div style={{
-          position: "absolute", inset: 0, display: "flex", alignItems: "center",
-          justifyContent: swipeOffset > 0 ? "flex-start" : "flex-end",
-          paddingLeft: swipeOffset > 0 ? 8 : 0, paddingRight: swipeOffset < 0 ? 8 : 0,
-          background: swipeAction === "complete" ? "#4C9A6A" : swipeAction === "delete" ? "#8A2E44" : "#1F2836",
-          borderRadius: 4, transition: "background 0.1s ease",
-        }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#EDE4D3" }}>
-            {swipeAction === "complete" ? "✓" : swipeAction === "delete" ? "✕" : ""}
-          </span>
-        </div>
-
-        {/* Card slides over the background */}
         <div
           draggable
           onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(q.id)); dragIdRef.current = q.id; setTimeout(() => setIsDragging(true), 0); }}
           onDragEnd={() => { dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); setDragOverTrash(false); }}
-          onTouchStart={onTouchStart}
-          onTouchMove={onTouchMove}
-          onTouchEnd={onTouchEnd}
           style={{
             position: "absolute", inset: 0,
             display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", borderRadius: 4,
             background: q.completed ? themePersonality.deepBase : isMissed ? "rgba(138,46,68,0.15)" : themePersonality.cardBase,
             borderLeft: `2px solid ${isMissed ? "#8A2E44" : diff.color}`,
             opacity: q.completed ? 0.5 : 1, cursor: "grab", userSelect: "none",
-            transform: `translateX(${swipeOffset}px)`,
-            transition: swipeOffset === 0 ? "transform 0.2s ease" : "none",
           }}>
           {/* Quick-complete dot */}
           <div
-            onTouchStart={(e) => { isDotTouchRef.current = true; e.stopPropagation(); }}
-            onTouchEnd={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
             onClick={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
             style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer", padding: 6, margin: "-6px -2px -6px -5px" }}
             title={q.completed ? "Undo" : "Complete"}
