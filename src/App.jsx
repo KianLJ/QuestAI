@@ -30,9 +30,6 @@ function Crown({ size = 16, color = "currentColor", style }) {
 function Coins({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" style={style}><circle cx="9" cy="10" r="6" /><circle cx="15" cy="14" r="6" opacity="0.6" /></svg>;
 }
-function BarChart2({ size = 16, color = "currentColor", style }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" style={style}><line x1="6" y1="20" x2="6" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="18" y1="20" x2="18" y2="14" /></svg>;
-}
 function FileText({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={style}><path d="M6 2h9l5 5v15H6V2z" /><path d="M15 2v5h5" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="15" y2="17" /></svg>;
 }
@@ -585,6 +582,7 @@ const VAPID_PUBLIC_KEY = "BN9N-JZIyMl9HuJ5nNwZ1GfwjL8U0283hXl4uRHhgAdpv1h6nDF3Iy
 const STORAGE_KEY = "quest-log-data";
 const XP_BASE = 100;
 const XP_INCREMENT = 15;
+const MISSED_PENALTY_PCT = 0.25;
 
 function habitTier(streakDays) {
   if (streakDays >= 66) return { label: "Diamond", color: "#4FA3C9" };
@@ -622,8 +620,6 @@ function streakBonusPct(days) { return days >= 30 ? 0.5 : days >= 14 ? 0.35 : da
 function rankForLevel(level) { let t = RANKS[0].title; for (const r of RANKS) if (level >= r.minLevel) t = r.title; return t; }
 function fmtTime(sec) { return `${Math.floor(sec / 60).toString().padStart(2, "0")}:${Math.floor(sec % 60).toString().padStart(2, "0")}`; }
 function xpFor(diffKey) { return DIFFICULTIES.find((d) => d.key === diffKey)?.xp || 10; }
-function emptyDayCounts() { return Object.fromEntries(DAYS.map((d) => [d.key, 0])); }
-function emptyDiffCounts() { return Object.fromEntries(DIFFICULTIES.map((d) => [d.key, 0])); }
 function extractJson(text) {
   const cleaned = text.replace(/```json|```/g, "").trim();
   // Try clean array first
@@ -860,8 +856,6 @@ export default function App() {
   const [devXP, setDevXP] = useState("200");
   const devTapCount = useRef(0);
   const devTapTimer = useRef(null); // { item, isNew }
-  const [historyDay, setHistoryDay] = useState(emptyDayCounts);
-  const [historyDiff, setHistoryDiff] = useState(emptyDiffCounts);
   const [habits, setHabits] = useState([]);
   const [habitPerfectDayDate, setHabitPerfectDayDate] = useState(null);
   const [newHabitName, setNewHabitName] = useState("");
@@ -904,7 +898,6 @@ export default function App() {
   const [dumpText, setDumpText] = useState("");
   const [dumpParsing, setDumpParsing] = useState(false);
   const [dumpError, setDumpError] = useState(false);
-  const [statsOpen, setStatsOpen] = useState(false);
 
   const [splittingId, setSplittingId] = useState(null);
   const [splitError, setSplitError] = useState(false);
@@ -954,8 +947,6 @@ export default function App() {
         });
 
         setQuests(workingQuests);
-        setHistoryDay({ ...emptyDayCounts(), ...(data.historyDay || {}) });
-        setHistoryDiff({ ...emptyDiffCounts(), ...(data.historyDiff || {}) });
         setTotalXP(data.totalXP || 0);
         setGold(data.gold || 0);
         setStreak(data.streak || 0);
@@ -1008,12 +999,12 @@ export default function App() {
     saveTimer.current = setTimeout(async () => {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
-          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff,
+          quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts,
           habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, historyDay, historyDiff, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -1049,8 +1040,6 @@ export default function App() {
         setPendingBattle(data.pendingBattle || null);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
-        setHistoryDay({ ...emptyDayCounts(), ...(data.historyDay || {}) });
-        setHistoryDiff({ ...emptyDiffCounts(), ...(data.historyDiff || {}) });
       } catch (e) {
         console.error("real-time sync parse error", e);
       }
@@ -1167,6 +1156,23 @@ export default function App() {
     return { ...d, color: `#${toHex(r)}${toHex(g)}${toHex(b)}` };
   });
   const today = todayStr();
+
+  // ---- Carry missed quests forward to today, flagged for a reduced-XP penalty ----
+  useEffect(() => {
+    if (!loaded) return;
+    setQuests((qs) => {
+      let changed = false;
+      const next = qs.map((q) => {
+        if (!q.completed && q.date < today) {
+          changed = true;
+          return { ...q, date: today, missedPenalty: true };
+        }
+        return q;
+      });
+      return changed ? next : qs;
+    });
+  }, [loaded, today]);
+
   const activeStats = computeActiveStats(equipped);
   const activeAura = equipped.aura ? ITEM_CATALOGUE.find((i) => i.id === equipped.aura) : null;
   const auraColor = activeAura?.auraColor || null;
@@ -1195,10 +1201,6 @@ export default function App() {
   const completedTodayCount = quests.filter((q) => q.completed && q.completedAt === today).length;
   const comboPctActive = comboBonusPct(completedTodayCount + 1);
   const streakPctActive = streakBonusPct(streak);
-  const dayStats = DAYS.map((d) => ({ label: d.label, count: (historyDay[d.key] || 0) + quests.filter((q) => q.completed && q.date && DAYS[new Date(q.date + "T00:00:00").getDay() === 0 ? 6 : new Date(q.date + "T00:00:00").getDay() - 1]?.key === d.key).length }));
-  const diffStats = themedDifficulties.map((d) => ({ label: d.label, color: d.color, count: (historyDiff[d.key] || 0) + quests.filter((q) => q.completed && q.difficulty === d.key).length }));
-  const maxDayCount = Math.max(1, ...dayStats.map((d) => d.count));
-  const maxDiffCount = Math.max(1, ...diffStats.map((d) => d.count));
 
   // ---- Calendar helpers ----
   function getWeekDates(anchorDate) {
@@ -1381,7 +1383,8 @@ export default function App() {
     const effectiveStreak = streakChanged ? newStreak : streak;
     const comboOrdinal = quests.filter((q) => q.completed && q.completedAt === today).length + 1;
     const boostPct = comboBonusPct(comboOrdinal) + streakBonusPct(effectiveStreak);
-    const workXP = quest.xp + beatClockBonus + bossBonus;
+    const baseXP = quest.missedPenalty ? Math.round(quest.xp * (1 - MISSED_PENALTY_PCT)) : quest.xp;
+    const workXP = baseXP + beatClockBonus + bossBonus;
     const boostXP = Math.round(workXP * boostPct);
     const gearXP = Math.round((workXP + boostXP) * activeStats.xpPct);
     const xpGain = workXP + boostXP + gearXP + milestoneBonus;
@@ -1518,8 +1521,6 @@ export default function App() {
     setWeeklyCompletedCount(0);
     setWeeklyBonusClaimed(false);
     setWeeklyBossId(null);
-    setHistoryDay(emptyDayCounts());
-    setHistoryDiff(emptyDiffCounts());
     setInventory(["theme_ember", "wpn_sword"]);
     setEquipped({ ...DEFAULT_GEAR });
     setLastDrop(null);
@@ -1791,7 +1792,7 @@ export default function App() {
   // ---- Quest card (compact for calendar cells) ----
   function QuestDot({ q }) {
     const diff = themedDifficulties.find((d) => d.key === q.difficulty);
-    const isOverdue = !q.completed && q.date < today;
+    const isMissed = !q.completed && q.missedPenalty;
     const startXRef = useRef(null);
     const [swipeOffset, setSwipeOffset] = useState(0);
     const [swipeAction, setSwipeAction] = useState(null);
@@ -1857,8 +1858,8 @@ export default function App() {
           style={{
             position: "absolute", inset: 0,
             display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", borderRadius: 4,
-            background: q.completed ? themePersonality.deepBase : isOverdue ? "rgba(138,46,68,0.15)" : themePersonality.cardBase,
-            borderLeft: `2px solid ${isOverdue && !q.completed ? "#8A2E44" : diff.color}`,
+            background: q.completed ? themePersonality.deepBase : isMissed ? "rgba(138,46,68,0.15)" : themePersonality.cardBase,
+            borderLeft: `2px solid ${isMissed ? "#8A2E44" : diff.color}`,
             opacity: q.completed ? 0.5 : 1, cursor: "grab", userSelect: "none",
             transform: `translateX(${swipeOffset}px)`,
             transition: swipeOffset === 0 ? "transform 0.2s ease" : "none",
@@ -1873,8 +1874,9 @@ export default function App() {
           />
           <span
             onClick={() => setQuestDetailFor(q.id)}
-            style={{ fontSize: 11, lineHeight: 1.2, color: isOverdue && !q.completed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer" }}>
-            {isOverdue && !q.completed ? "⚠ " : ""}{q.title}
+            style={{ fontSize: 11, lineHeight: 1.2, color: isMissed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer" }}
+            title={isMissed ? `Missed original due date — XP reduced ${Math.round(MISSED_PENALTY_PCT * 100)}%` : undefined}>
+            {isMissed ? "❄ " : ""}{q.title}
           </span>
         </div>
       </div>
@@ -2009,9 +2011,10 @@ export default function App() {
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 15, fontWeight: 600, textDecoration: q.completed ? "line-through" : "none", marginBottom: 4 }}>{q.title}</div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ fontSize: 11, color: diff.color, fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{diff.label.toUpperCase()} · {q.xp} XP</span>
+                    <span style={{ fontSize: 11, color: diff.color, fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{diff.label.toUpperCase()} · {q.missedPenalty ? Math.round(q.xp * (1 - MISSED_PENALTY_PCT)) : q.xp} XP</span>
                     {q.estMinutes && <span style={{ fontSize: 11, color: "#5C6773", fontFamily: "ui-monospace, Menlo, monospace" }}>~{q.estMinutes}m</span>}
                     {q.recurring && <Repeat size={11} color="#5C6773" />}
+                    {!q.completed && q.missedPenalty && <span style={{ fontSize: 11, color: "#8A2E44", fontWeight: 700 }}>❄ Missed (-{Math.round(MISSED_PENALTY_PCT * 100)}% XP)</span>}
                     {isBossCard && <span style={{ fontSize: 11, color: "#8A5FBF", fontWeight: 700 }}>👑 Boss</span>}
                   </div>
                   {q.reason && <div style={{ fontSize: 11, color: "#5C6773", marginTop: 4, fontStyle: "italic" }}>{q.reason}</div>}
@@ -2529,10 +2532,7 @@ export default function App() {
             <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}><Plus size={15} /> Add Quest</button>
             <button onClick={() => setDumpModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: "pointer" }}><FileText size={14} /> Brain Dump</button>
 
-            <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => setStatsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><BarChart2 size={14} /> Stats</button>
-              <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /> Settings</button>
-            </div>
+            <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /> Settings</button>
             {bossQuest && (
               <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", background: "rgba(138,95,191,0.1)", borderRadius: 6, border: "1px solid #8A5FBF" }}>
                 <Crown size={12} color="#8A5FBF" />
@@ -2862,35 +2862,6 @@ export default function App() {
               <button onClick={submitDump} className="qlog-btn" disabled={dumpParsing || !dumpText.trim()} style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: dumpParsing || !dumpText.trim() ? "default" : "pointer", opacity: dumpParsing || !dumpText.trim() ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}>
                 {dumpParsing ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />} {dumpParsing ? "Planning..." : "Turn into quests"}
               </button>
-            </div>
-          </div>
-        )}
-
-        {statsOpen && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-            <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 380, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
-              <button onClick={() => setStatsOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Insights</h3>
-              <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 8px", fontWeight: 600 }}>COMPLETED BY DAY</p>
-              <div style={{ marginBottom: 18 }}>
-                {dayStats.map((d) => (
-                  <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                    <span style={{ width: 28, fontSize: 11, color: "#8A8578" }}>{d.label}</span>
-                    <div style={{ flex: 1, height: 9, background: "#141C27", borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${(d.count / maxDayCount) * 100}%`, background: accent, borderRadius: 5 }} /></div>
-                    <span style={{ width: 16, fontSize: 11, color: "#5C6773", fontFamily: "ui-monospace, Menlo, monospace", textAlign: "right" }}>{d.count}</span>
-                  </div>
-                ))}
-              </div>
-              <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 8px", fontWeight: 600 }}>COMPLETED BY DIFFICULTY</p>
-              <div>
-                {diffStats.map((d) => (
-                  <div key={d.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                    <span style={{ width: 46, fontSize: 11, color: "#8A8578" }}>{d.label}</span>
-                    <div style={{ flex: 1, height: 9, background: "#141C27", borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${(d.count / maxDiffCount) * 100}%`, background: d.color, borderRadius: 5 }} /></div>
-                    <span style={{ width: 16, fontSize: 11, color: "#5C6773", fontFamily: "ui-monospace, Menlo, monospace", textAlign: "right" }}>{d.count}</span>
-                  </div>
-                ))}
-              </div>
             </div>
           </div>
         )}
