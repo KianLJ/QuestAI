@@ -168,6 +168,13 @@ function dayDateLabel(mondayISO, offset) {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 function currentDayKey() { return DAYS[new Date().getDay() === 0 ? 6 : new Date().getDay() - 1].key; }
+function nowHHMM() { const d = new Date(); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+function formatDeadline(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${pad2(m)} ${period}`;
+}
 function costForLevel(level) { return XP_BASE + XP_INCREMENT * (level - 1); }
 function levelFromXP(totalXP) {
   let level = 1, remaining = totalXP;
@@ -418,10 +425,12 @@ export default function App() {
   const [habits, setHabits] = useState([]);
   const [habitPerfectDayDate, setHabitPerfectDayDate] = useState(null);
   const [newHabitName, setNewHabitName] = useState("");
+  const [newHabitDeadline, setNewHabitDeadline] = useState("");
   const [habitBanner, setHabitBanner] = useState(null);
   const [perfectDayBanner, setPerfectDayBanner] = useState(false);
   const [habitXpPop, setHabitXpPop] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [, setClockTick] = useState(0);
 
   // Calendar state
   const [calView, setCalView] = useState("week"); // "day" | "week" | "month"
@@ -541,9 +550,9 @@ export default function App() {
         }
       } else {
         setHabits([
-          { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
-          { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
-          { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
+          { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
+          { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
+          { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
         ]);
       }
       setLoaded(true);
@@ -611,6 +620,11 @@ export default function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [focus?.running, focus?.questId]);
+  // ---- Tick every minute so habit deadlines flip to "late" live ----
+  useEffect(() => {
+    const id = setInterval(() => setClockTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
   // ---- Sync notification permission state on load ----
   useEffect(() => {
     if ("Notification" in window) setNotifPermission(Notification.permission);
@@ -1061,13 +1075,17 @@ export default function App() {
     if (u.perfectDayEarned) setHabitPerfectDayDate((d) => d === today ? null : d);
     setHabits((hs) => hs.map((h) => h.id === id ? { ...h, streak: u.prevStreak, lastCompletedDate: u.prevLastCompletedDate, totalCompletions: Math.max(0, h.totalCompletions - 1), undo: null } : h));
   }
-  function addHabit(name) {
+  function addHabit(name, deadlineTime = "") {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setHabits((hs) => [...hs, { id: Date.now() + Math.random(), name: trimmed, streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null }]);
+    setHabits((hs) => [...hs, { id: Date.now() + Math.random(), name: trimmed, streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: deadlineTime || null }]);
     setNewHabitName("");
+    setNewHabitDeadline("");
   }
   function deleteHabit(id) { setHabits((hs) => hs.filter((h) => h.id !== id)); }
+  function setHabitDeadline(id, deadlineTime) {
+    setHabits((hs) => hs.map((h) => h.id === id ? { ...h, deadlineTime: deadlineTime || null } : h));
+  }
 
   async function clearAllData() {
     try { await window.storage.delete(STORAGE_KEY); } catch (e) {}
@@ -1089,9 +1107,9 @@ export default function App() {
     setShifts([]);
     setStatChoiceQueue([]);
     setHabits([
-      { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
-      { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
-      { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null },
+      { id: Date.now() + 0.1, name: "Make the bed", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
+      { id: Date.now() + 0.2, name: "Brush teeth", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
+      { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
     ]);
     setHabitPerfectDayDate(null);
     setConfirmClear(false);
@@ -2268,13 +2286,24 @@ export default function App() {
               {habits.map((h) => {
                 const doneToday = h.lastCompletedDate === today;
                 const tier = habitTier(h.streak);
+                const isLate = !!h.deadlineTime && !doneToday && nowHHMM() > h.deadlineTime;
                 return (
-                  <div key={h.id} style={{ position: "relative", display: "flex", alignItems: "center", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 6, padding: "4px 8px" }}>
+                  <div key={h.id} style={{ position: "relative", display: "flex", alignItems: "center", gap: 6, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: "4px 8px" }}>
                     {!doneToday
                       ? <button onClick={() => completeHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
                       : <button onClick={() => uncompleteHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
                     }
                     <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
+                    {isLate && <span style={{ fontSize: 9, fontWeight: 700, color: "#D9536A" }}>LATE</span>}
+                    <label title={h.deadlineTime ? `Due by ${formatDeadline(h.deadlineTime)}` : "Set a due time"} style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }}>
+                      <Timer size={10} color={isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563"} />
+                      <input
+                        type="time"
+                        value={h.deadlineTime || ""}
+                        onChange={(e) => setHabitDeadline(h.id, e.target.value)}
+                        style={{ width: 62, background: "transparent", border: "none", color: isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563", fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", colorScheme: "dark" }}
+                      />
+                    </label>
                     {h.streak > 0 && (
                       <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
                         <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
@@ -2287,8 +2316,9 @@ export default function App() {
               })}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <input value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addHabit(newHabitName)} placeholder="Add a habit — e.g. drink water" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", fontSize: 12 }} />
-              <button onClick={() => addHabit(newHabitName)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 8px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={13} color="#1B2430" /></button>
+              <input value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addHabit(newHabitName, newHabitDeadline)} placeholder="Add a habit — e.g. drink water" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", fontSize: 12 }} />
+              <input type="time" value={newHabitDeadline} onChange={(e) => setNewHabitDeadline(e.target.value)} title="Optional due time" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "5px 6px", color: "#EDE4D3", fontSize: 11, colorScheme: "dark" }} />
+              <button onClick={() => addHabit(newHabitName, newHabitDeadline)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 8px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={13} color="#1B2430" /></button>
             </div>
           </div>
 
