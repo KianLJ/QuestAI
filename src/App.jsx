@@ -2,13 +2,18 @@ import { useState, useEffect, useRef } from "react";
 import {
   Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3,
   Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2,
-  Timer, Loader2, Edit2, IconHome, IconCalendar, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
+  Timer, Loader2, Edit2, IconHome, IconCalendar, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
   IconTitle, IconPalette,
 } from "./icons";
 import {
   RARITIES, ITEM_CATALOGUE, SETS, computeActiveStats, CRATE_TIERS, RARITY_ORDER, GEAR_SLOTS, COSMETIC_SLOTS,
   SLOTS, SLOT_LABELS, DEFAULT_GEAR, rollCrate,
 } from "./itemCatalogue";
+import {
+  MUSCLE_GROUPS, MUSCLE_LABELS, EQUIPMENT_TYPES, EQUIPMENT_LABELS, EXERCISE_CATALOGUE, findExercise, summarizeMuscleVolume,
+} from "./exerciseCatalogue";
+import { auth, onAuthChange, logOut } from "./firebase";
+import AuthScreen from "./AuthScreen";
 
 const DIFFICULTIES = [
   { key: "trivial", label: "Trivial", xp: 5, color: "#8A8578" },
@@ -31,6 +36,9 @@ const STREAK_MILESTONES = { 3: 15, 7: 30, 14: 60, 30: 150 };
 const HABIT_XP = 3;
 const HABIT_STREAK_MILESTONES = { 3: 5, 7: 10, 21: 25, 66: 50 };
 const PERFECT_DAY_XP = 10;
+const WORKOUT_SET_XP = 2;
+const WORKOUT_COMPLETE_XP = 20;
+const DEFAULT_WORKOUT_SCHEDULE = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
 // ---- Enemy SVG silhouettes ----
 // ---- Aura particle component ----
 function AuraParticles({ color, type }) {
@@ -222,9 +230,10 @@ async function callQuestAI(prompt, timeoutMs = 60000, maxTokens = 4096) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
+    const idToken = await auth.currentUser?.getIdToken();
     response = await fetch("/api/ai", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
@@ -237,6 +246,7 @@ async function callQuestAI(prompt, timeoutMs = 60000, maxTokens = 4096) {
   } finally {
     clearTimeout(timer);
   }
+  if (response.status === 401) throw new Error("Not signed in — please log in again.");
   if (response.status === 500) throw new Error("Gemini API key not configured on server — check Vercel environment variables.");
   if (response.status === 429) { const err = new Error("AI quota reached for today"); err.isQuota = true; throw err; }
   if (!response.ok) throw new Error(`AI error ${response.status}`);
@@ -396,7 +406,29 @@ function WeekShiftModal({ weekDates, shifts, accent, themePersonality, onSave, o
   );
 }
 
-export default function App() {
+function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete }) {
+  const [weight, setWeight] = useState(set.weight || "");
+  const [reps, setReps] = useState(set.reps || "");
+  if (set.completed) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
+        <button onClick={onUncomplete} className="qlog-btn" style={{ width: 18, height: 18, minWidth: 18, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={10} color="#141C27" /></button>
+        <span style={{ fontSize: 11, color: "#5C6773", width: 46 }}>Set {setNum}</span>
+        <span style={{ fontSize: 13, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{set.weight || 0} × {set.reps || 0}</span>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
+      <span style={{ fontSize: 11, color: "#5C6773", width: 46, flexShrink: 0 }}>Set {setNum}</span>
+      <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="kg" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
+      <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} placeholder="reps" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
+      <button onClick={() => onLog(weight, reps)} disabled={!weight || !reps} className="qlog-btn" style={{ width: 28, height: 28, minWidth: 28, borderRadius: "50%", border: `2px solid ${!weight || !reps ? "#33414F" : accent}`, background: "transparent", cursor: !weight || !reps ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={13} color={!weight || !reps ? "#33414F" : accent} /></button>
+    </div>
+  );
+}
+
+function AppContent({ user }) {
   // ---- State ----
   const [quests, setQuests] = useState([]);
   const [totalXP, setTotalXP] = useState(0);
@@ -431,8 +463,27 @@ export default function App() {
   const [habitXpPop, setHabitXpPop] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [, setClockTick] = useState(0);
-  const [activeTab, setActiveTab] = useState("home"); // "home" | "quests" | "habits" | "gear"
+  const [activeTab, setActiveTab] = useState("home"); // "home" | "quests" | "habits" | "workout" | "gear"
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
+
+  // Workout state
+  const [workoutPlans, setWorkoutPlans] = useState([]);
+  const [workoutSchedule, setWorkoutSchedule] = useState(DEFAULT_WORKOUT_SCHEDULE);
+  const [workoutSession, setWorkoutSession] = useState(null);
+  const [workoutHistory, setWorkoutHistory] = useState([]);
+  const [customExercises, setCustomExercises] = useState([]);
+  const [autoRestTimer, setAutoRestTimer] = useState(true);
+  const [activeWorkoutTab, setActiveWorkoutTab] = useState("today"); // "today" | "plans" | "schedule" | "history"
+  const [editingPlanId, setEditingPlanId] = useState(null);
+  const [exercisePickerFor, setExercisePickerFor] = useState(null); // planId while picking an exercise to add
+  const [exercisePickerFilter, setExercisePickerFilter] = useState({ muscle: null, equipment: null, q: "" });
+  const [newPlanName, setNewPlanName] = useState("");
+  const [customExerciseForm, setCustomExerciseForm] = useState(null); // { name, primaryMuscle, equipment } while adding a custom exercise
+  const [workoutXpPop, setWorkoutXpPop] = useState(null);
+  const [historyExerciseId, setHistoryExerciseId] = useState(null); // set to view per-exercise progress
+  const [expandedHistoryId, setExpandedHistoryId] = useState(null);
+  const [sessionOverlayOpen, setSessionOverlayOpen] = useState(false);
+  const [, setWorkoutClockTick] = useState(0);
 
   // Calendar state
   const [calView, setCalView] = useState("week"); // "day" | "week" | "month"
@@ -540,6 +591,20 @@ export default function App() {
         setShifts(data.shifts || []);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
+        setWorkoutPlans(data.workoutPlans || []);
+        setWorkoutSchedule(data.workoutSchedule || DEFAULT_WORKOUT_SCHEDULE);
+        setWorkoutHistory(data.workoutHistory || []);
+        setCustomExercises(data.customExercises || []);
+        setAutoRestTimer(data.autoRestTimer === undefined ? true : data.autoRestTimer);
+        if (data.workoutSession) {
+          const s = data.workoutSession;
+          if (s.restTimer && s.restTimer.running && s.restTimer.endsAt) {
+            const remaining = Math.floor((s.restTimer.endsAt - Date.now()) / 1000);
+            setWorkoutSession({ ...s, restTimer: remaining > 0 ? { ...s.restTimer, secondsLeft: remaining } : null });
+          } else {
+            setWorkoutSession(s);
+          }
+        }
         if (data.calView) setCalView(data.calView);
         if (data.focus) {
           const f = data.focus;
@@ -570,10 +635,11 @@ export default function App() {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
           quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts,
           habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus,
+          workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded, workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -609,6 +675,12 @@ export default function App() {
         setPendingBattle(data.pendingBattle || null);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
+        setWorkoutPlans(data.workoutPlans || []);
+        setWorkoutSchedule(data.workoutSchedule || DEFAULT_WORKOUT_SCHEDULE);
+        setWorkoutSession(data.workoutSession || null);
+        setWorkoutHistory(data.workoutHistory || []);
+        setCustomExercises(data.customExercises || []);
+        setAutoRestTimer(data.autoRestTimer === undefined ? true : data.autoRestTimer);
       } catch (e) {
         console.error("real-time sync parse error", e);
       }
@@ -627,6 +699,25 @@ export default function App() {
     const id = setInterval(() => setClockTick((t) => t + 1), 30000);
     return () => clearInterval(id);
   }, []);
+  // ---- Workout rest-timer countdown ----
+  useEffect(() => {
+    if (!workoutSession?.restTimer?.running) return;
+    const id = setInterval(() => {
+      setWorkoutSession((s) => {
+        if (!s || !s.restTimer) return s;
+        const remaining = Math.round((s.restTimer.endsAt - Date.now()) / 1000);
+        if (remaining <= 0) return { ...s, restTimer: null };
+        return { ...s, restTimer: { ...s.restTimer, secondsLeft: remaining } };
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [workoutSession?.restTimer?.running, workoutSession?.restTimer?.endsAt]);
+  // ---- Workout session elapsed-time tick ----
+  useEffect(() => {
+    if (!workoutSession) return;
+    const id = setInterval(() => setWorkoutClockTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [workoutSession?.startedAt]);
   // ---- Sync notification permission state on load ----
   useEffect(() => {
     if ("Notification" in window) setNotifPermission(Notification.permission);
@@ -1097,6 +1188,133 @@ export default function App() {
     setHabits((hs) => hs.map((h) => h.id === id ? { ...h, deadlineTime: deadlineTime || null } : h));
   }
 
+  // ---- Workout: plan CRUD ----
+  function addWorkoutPlan(name) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const id = Date.now() + Math.random();
+    setWorkoutPlans((ps) => [...ps, { id, name: trimmed, exercises: [] }]);
+    setNewPlanName("");
+    setEditingPlanId(id);
+  }
+  function deleteWorkoutPlan(id) {
+    setWorkoutPlans((ps) => ps.filter((p) => p.id !== id));
+    setWorkoutSchedule((s) => {
+      const next = { ...s };
+      for (const day of Object.keys(next)) if (next[day] === id) next[day] = null;
+      return next;
+    });
+    if (editingPlanId === id) setEditingPlanId(null);
+  }
+  function addExerciseToPlan(planId, exerciseId) {
+    setWorkoutPlans((ps) => ps.map((p) => p.id === planId
+      ? { ...p, exercises: [...p.exercises, { id: Date.now() + Math.random(), exerciseId, sets: 3, targetReps: "8-12", restSeconds: 90 }] }
+      : p));
+    setExercisePickerFor(null);
+    setExercisePickerFilter({ muscle: null, equipment: null, q: "" });
+  }
+  function updatePlanExercise(planId, exId, patch) {
+    setWorkoutPlans((ps) => ps.map((p) => p.id === planId
+      ? { ...p, exercises: p.exercises.map((e) => e.id === exId ? { ...e, ...patch } : e) }
+      : p));
+  }
+  function removePlanExercise(planId, exId) {
+    setWorkoutPlans((ps) => ps.map((p) => p.id === planId ? { ...p, exercises: p.exercises.filter((e) => e.id !== exId) } : p));
+  }
+  function addCustomExercise(form) {
+    const trimmed = (form.name || "").trim();
+    if (!trimmed || !form.primaryMuscle || !form.equipment) return null;
+    const id = "custom-" + Date.now() + Math.random();
+    const ex = { id, name: trimmed, equipment: form.equipment, primaryMuscle: form.primaryMuscle, muscleGroups: [form.primaryMuscle], category: "custom" };
+    setCustomExercises((cs) => [...cs, ex]);
+    setCustomExerciseForm(null);
+    return id;
+  }
+  function setScheduleDay(dayKey, planId) {
+    setWorkoutSchedule((s) => ({ ...s, [dayKey]: planId || null }));
+  }
+
+  // ---- Workout: active session ----
+  function startWorkout(plan) {
+    const exercises = plan.exercises.map((pe) => {
+      const ex = findExercise(pe.exerciseId, customExercises);
+      return {
+        exerciseId: pe.exerciseId, name: ex?.name || "Exercise", restSeconds: pe.restSeconds || 90, targetReps: pe.targetReps || "",
+        sets: Array.from({ length: pe.sets || 3 }, () => ({ weight: "", reps: "", completed: false })),
+      };
+    });
+    setWorkoutSession({ planId: plan.id, planName: plan.name, startedAt: Date.now(), exercises, restTimer: null, setsXp: 0 });
+    setSessionOverlayOpen(true);
+  }
+  function startRestTimer(seconds, exIdx, setIdx) {
+    if (!seconds || seconds <= 0) return;
+    const endsAt = Date.now() + seconds * 1000;
+    setWorkoutSession((s) => s ? { ...s, restTimer: { totalSeconds: seconds, secondsLeft: seconds, endsAt, running: true, exerciseIdx: exIdx, setIdx } } : s);
+  }
+  function adjustRestTimer(deltaSeconds) {
+    setWorkoutSession((s) => {
+      if (!s || !s.restTimer) return s;
+      const newEndsAt = s.restTimer.endsAt + deltaSeconds * 1000;
+      const secondsLeft = Math.max(0, Math.round((newEndsAt - Date.now()) / 1000));
+      if (secondsLeft <= 0) return { ...s, restTimer: null };
+      return { ...s, restTimer: { ...s.restTimer, endsAt: newEndsAt, secondsLeft } };
+    });
+  }
+  function skipRestTimer() {
+    setWorkoutSession((s) => s ? { ...s, restTimer: null } : s);
+  }
+  function logSet(exIdx, setIdx, weight, reps, restSeconds) {
+    setWorkoutSession((s) => {
+      if (!s) return s;
+      const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
+        ...e, sets: e.sets.map((st, j) => j !== setIdx ? st : { ...st, weight, reps, completed: true }),
+      });
+      const nextSetsXp = (s.setsXp || 0) + WORKOUT_SET_XP;
+      const restTimer = autoRestTimer ? { totalSeconds: restSeconds, secondsLeft: restSeconds, endsAt: Date.now() + restSeconds * 1000, running: true, exerciseIdx: exIdx, setIdx } : s.restTimer;
+      return { ...s, exercises, setsXp: nextSetsXp, restTimer };
+    });
+    setTotalXP((t) => t + WORKOUT_SET_XP);
+    setWorkoutXpPop({ key: `${exIdx}-${setIdx}-${Date.now()}`, xp: WORKOUT_SET_XP });
+    setTimeout(() => setWorkoutXpPop(null), 900);
+  }
+  function uncompleteSet(exIdx, setIdx) {
+    setWorkoutSession((s) => {
+      if (!s) return s;
+      const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
+        ...e, sets: e.sets.map((st, j) => j !== setIdx ? st : { ...st, completed: false }),
+      });
+      return { ...s, exercises, setsXp: Math.max(0, (s.setsXp || 0) - WORKOUT_SET_XP) };
+    });
+    setTotalXP((t) => Math.max(0, t - WORKOUT_SET_XP));
+  }
+  function finishWorkout() {
+    if (!workoutSession) return;
+    const completedSets = workoutSession.exercises.reduce((sum, e) => sum + e.sets.filter((s) => s.completed).length, 0);
+    if (completedSets === 0) { setWorkoutSession(null); return; }
+    const durationSeconds = Math.max(1, Math.floor((Date.now() - workoutSession.startedAt) / 1000));
+    const totalVolume = workoutSession.exercises.reduce((sum, e) => sum + e.sets.reduce((s2, st) => s2 + (st.completed ? (Number(st.weight) || 0) * (Number(st.reps) || 0) : 0), 0), 0);
+    const prevLevel = levelFromXP(totalXP).level;
+    const xpGain = WORKOUT_COMPLETE_XP;
+    const goldEarned = Math.max(1, Math.round(xpGain / 10));
+    const newTotal = totalXP + xpGain;
+    const newLevel = levelFromXP(newTotal).level;
+    setTotalXP(newTotal);
+    setGold((g) => g + goldEarned);
+    const historyEntry = {
+      id: Date.now() + Math.random(), planId: workoutSession.planId, planName: workoutSession.planName, date: todayStr(),
+      durationSeconds, totalVolume, xpEarned: (workoutSession.setsXp || 0) + xpGain, goldEarned,
+      exercises: workoutSession.exercises.map((e) => ({ exerciseId: e.exerciseId, name: e.name, sets: e.sets.filter((s) => s.completed).map((s) => ({ weight: Number(s.weight) || 0, reps: Number(s.reps) || 0 })) })),
+    };
+    setWorkoutHistory((h) => [historyEntry, ...h]);
+    setWorkoutXpPop({ key: "complete-" + Date.now(), xp: xpGain });
+    setTimeout(() => setWorkoutXpPop(null), 1200);
+    if (newLevel > prevLevel) { spawnConfetti(); setStatChoiceQueue((q) => [...q, { level: newLevel, rank: rankForLevel(newLevel) }]); }
+    setWorkoutSession(null);
+    setSessionOverlayOpen(false);
+  }
+  function discardWorkout() { setWorkoutSession(null); setSessionOverlayOpen(false); }
+  function deleteWorkoutHistoryEntry(id) { setWorkoutHistory((h) => h.filter((e) => e.id !== id)); }
+
   async function clearAllData() {
     try { await window.storage.delete(STORAGE_KEY); } catch (e) {}
     setQuests([]);
@@ -1120,6 +1338,12 @@ export default function App() {
       { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
     ]);
     setHabitPerfectDayDate(null);
+    setWorkoutPlans([]);
+    setWorkoutSchedule(DEFAULT_WORKOUT_SCHEDULE);
+    setWorkoutSession(null);
+    setWorkoutHistory([]);
+    setCustomExercises([]);
+    setAutoRestTimer(true);
     setConfirmClear(false);
     setSettingsOpen(false);
   }
@@ -1586,10 +1810,7 @@ export default function App() {
           userVisibleOnly: true,
           applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY),
         });
-        // Save subscription directly to Firestore using the existing client SDK
-        const { db } = await import("./firebase.js");
-        const { doc, setDoc } = await import("firebase/firestore");
-        await setDoc(doc(db, "storage", "main"), { pushSubscription: sub.toJSON() }, { merge: true });
+        await window.storage.set("pushSubscription", sub.toJSON());
         console.log("Push subscription saved to Firestore");
       } catch (e) {
         console.warn("Push subscription failed:", e);
@@ -1931,6 +2152,70 @@ export default function App() {
               {focus.secondsLeft > 0 && <p style={{ fontSize: 11, color: "#5C6773", textAlign: "center", marginTop: 8 }}>Finish before time's up for a bonus XP boost.</p>}
             </>)}
           </div>
+        </div>
+      )}
+
+      {/* Floating workout session pill */}
+      {workoutSession && !sessionOverlayOpen && (
+        <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: 20, left: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
+          <IconDumbbell size={16} color={accent} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workoutSession.planName}</span>
+          {workoutSession.restTimer && <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: accent, fontSize: 12 }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>}
+        </button>
+      )}
+
+      {/* Active workout session overlay */}
+      {workoutSession && sessionOverlayOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "#141C27", zIndex: 72, overflowY: "auto", padding: "16px 14px 100px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <button onClick={() => setSessionOverlayOpen(false)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}><ChevronLeft size={16} /> Minimize</button>
+            <button onClick={() => { if (window.confirm("Discard this workout? Logged sets won't be saved.")) discardWorkout(); }} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", fontSize: 12 }}>Discard</button>
+          </div>
+          <h2 style={{ margin: "6px 0 2px", fontSize: 18, fontWeight: 700, fontFamily: "Georgia, serif" }}>{workoutSession.planName}</h2>
+          <div style={{ fontSize: 12, color: "#8A8578", marginBottom: 14, fontFamily: "ui-monospace, Menlo, monospace" }}>{fmtTime(Math.floor((Date.now() - workoutSession.startedAt) / 1000))} elapsed</div>
+
+          {workoutSession.restTimer && (
+            <div style={{ background: "rgba(201,162,39,0.1)", border: `1px solid ${accent}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.4 }}>Rest</span>
+                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 20, fontWeight: 700, color: accent }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>
+              </div>
+              <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
+                <div style={{ height: "100%", width: `${(workoutSession.restTimer.secondsLeft / workoutSession.restTimer.totalSeconds) * 100}%`, background: accent, borderRadius: 4, transition: "width 1s linear" }} />
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => adjustRestTimer(30)} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: 11, color: "#EDE4D3", cursor: "pointer" }}>+30s</button>
+                <button onClick={skipRestTimer} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Skip</button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {workoutSession.exercises.map((ex, exIdx) => (
+              <div key={exIdx} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{ex.name}</span>
+                  <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {ex.sets.map((st, setIdx) => (
+                    <WorkoutSetRow
+                      key={setIdx}
+                      setNum={setIdx + 1}
+                      set={st}
+                      accent={accent}
+                      onLog={(weight, reps) => logSet(exIdx, setIdx, weight, reps, ex.restSeconds)}
+                      onUncomplete={() => uncompleteSet(exIdx, setIdx)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={finishWorkout} className="qlog-btn" style={{ width: "100%", marginTop: 16, background: accent, border: "none", borderRadius: 10, padding: "13px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>Finish Workout</button>
+
+          {workoutXpPop && <div className="xp-pop" style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", fontWeight: 700, fontSize: 14, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{workoutXpPop.xp} XP</div>}
         </div>
       )}
 
@@ -2414,6 +2699,215 @@ export default function App() {
           </div>
         )}
 
+        {/* Workout */}
+        {activeTab === "workout" && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto" }}>
+              {[
+                { key: "today", label: "Today" },
+                { key: "plans", label: "Plans" },
+                { key: "schedule", label: "Schedule" },
+                { key: "history", label: "History" },
+              ].map((t) => (
+                <button key={t.key} onClick={() => { setActiveWorkoutTab(t.key); setHistoryExerciseId(null); }} className="qlog-btn" style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 20, border: `1px solid ${activeWorkoutTab === t.key ? accent : "#33414F"}`, background: activeWorkoutTab === t.key ? accent : "#232E3D", color: activeWorkoutTab === t.key ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{t.label}</button>
+              ))}
+            </div>
+
+            {activeWorkoutTab === "today" && (() => {
+              const dayKey = currentDayKey();
+              const todayPlan = workoutPlans.find((p) => p.id === workoutSchedule[dayKey]);
+              const muscleVolume = todayPlan ? summarizeMuscleVolume(todayPlan.exercises, customExercises) : [];
+              const maxVol = muscleVolume[0]?.volume || 1;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {workoutSession && (
+                    <div style={{ background: "rgba(201,162,39,0.1)", border: `1px solid ${accent}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: accent }}>Workout in progress</div>
+                        <div style={{ fontSize: 10, color: "#8A8578" }}>{workoutSession.planName}</div>
+                      </div>
+                      <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Resume</button>
+                    </div>
+                  )}
+                  {!todayPlan && (
+                    <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "24px 14px", textAlign: "center" }}>
+                      <IconDumbbell size={26} color="#5C6773" style={{ marginBottom: 8 }} />
+                      <p style={{ fontSize: 13, color: "#8A8578", margin: 0 }}>No workout scheduled for today.</p>
+                      <button onClick={() => setActiveWorkoutTab("schedule")} className="qlog-btn" style={{ marginTop: 10, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 14px", fontSize: 12, color: accent, cursor: "pointer" }}>Set up split</button>
+                    </div>
+                  )}
+                  {todayPlan && (
+                    <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700 }}>{todayPlan.name}</span>
+                        <span style={{ fontSize: 10, color: "#5C6773" }}>{todayPlan.exercises.length} exercises</span>
+                      </div>
+                      {muscleVolume.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+                          {muscleVolume.slice(0, 5).map((m) => (
+                            <div key={m.muscle} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 10, color: "#8A8578", width: 72, flexShrink: 0 }}>{MUSCLE_LABELS[m.muscle]}</span>
+                              <div style={{ flex: 1, height: 5, background: "#141C27", borderRadius: 3, overflow: "hidden" }}>
+                                <div style={{ height: "100%", width: `${(m.volume / maxVol) * 100}%`, background: accent, borderRadius: 3 }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+                        {todayPlan.exercises.map((pe) => {
+                          const ex = findExercise(pe.exerciseId, customExercises);
+                          return <div key={pe.id} style={{ fontSize: 12, color: "#EDE4D3", display: "flex", justifyContent: "space-between" }}><span>{ex?.name || "?"}</span><span style={{ color: "#5C6773" }}>{pe.sets} × {pe.targetReps}</span></div>;
+                        })}
+                      </div>
+                      {!workoutSession && (
+                        <button onClick={() => startWorkout(todayPlan)} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>Start Workout</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {activeWorkoutTab === "plans" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {workoutPlans.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center" }}>No plans yet — create one below.</p>}
+                {workoutPlans.map((plan) => {
+                  const isEditing = editingPlanId === plan.id;
+                  const muscleVolume = summarizeMuscleVolume(plan.exercises, customExercises);
+                  return (
+                    <div key={plan.id} style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "10px 14px" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <button onClick={() => setEditingPlanId(isEditing ? null : plan.id)} className="qlog-btn" style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", flex: 1, padding: 0 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{plan.name}</span>
+                          <span style={{ fontSize: 10, color: "#5C6773", marginLeft: 8 }}>{plan.exercises.length} exercises</span>
+                        </button>
+                        <button onClick={() => deleteWorkoutPlan(plan.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={13} /></button>
+                      </div>
+                      {muscleVolume.length > 0 && (
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+                          {muscleVolume.slice(0, 4).map((m) => <span key={m.muscle} style={{ fontSize: 9, color: accent, background: accent + "18", borderRadius: 10, padding: "2px 7px" }}>{MUSCLE_LABELS[m.muscle]}</span>)}
+                        </div>
+                      )}
+                      {isEditing && (
+                        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                          {plan.exercises.map((pe) => {
+                            const ex = findExercise(pe.exerciseId, customExercises);
+                            return (
+                              <div key={pe.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                                  <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex?.name || "?"}</span>
+                                  <button onClick={() => removePlanExercise(plan.id, pe.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><X size={12} /></button>
+                                </div>
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Sets <input type="number" min="1" value={pe.sets} onChange={(e) => updatePlanExercise(plan.id, pe.id, { sets: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 40, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Reps <input value={pe.targetReps} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetReps: e.target.value })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Rest(s) <input type="number" min="0" value={pe.restSeconds} onChange={(e) => updatePlanExercise(plan.id, pe.id, { restSeconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          <button onClick={() => setExercisePickerFor(plan.id)} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: accent, cursor: "pointer" }}>+ Add Exercise</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input value={newPlanName} onChange={(e) => setNewPlanName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addWorkoutPlan(newPlanName)} placeholder="New plan — e.g. Push Day" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "7px 10px", color: "#EDE4D3", fontSize: 12 }} />
+                  <button onClick={() => addWorkoutPlan(newPlanName)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 10px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={14} color="#1B2430" /></button>
+                </div>
+              </div>
+            )}
+
+            {activeWorkoutTab === "schedule" && (
+              <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 10px" }}>Assign a plan to each weekday — it repeats every week.</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {DAYS.map((d) => (
+                    <div key={d.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 36, fontSize: 12, fontWeight: 700, color: d.key === currentDayKey() ? accent : "#8A8578" }}>{d.label}</span>
+                      <select value={workoutSchedule[d.key] || ""} onChange={(e) => setScheduleDay(d.key, e.target.value ? Number(e.target.value) : null)} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
+                        <option value="">Rest day</option>
+                        {workoutPlans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                {workoutPlans.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", marginTop: 10, marginBottom: 0 }}>Create a plan first in the Plans tab.</p>}
+              </div>
+            )}
+
+            {activeWorkoutTab === "history" && (
+              historyExerciseId ? (() => {
+                const ex = findExercise(historyExerciseId, customExercises);
+                const sessions = workoutHistory.filter((h) => h.exercises.some((e) => e.exerciseId === historyExerciseId)).sort((a, b) => (a.date < b.date ? 1 : -1));
+                return (
+                  <div>
+                    <button onClick={() => setHistoryExerciseId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All exercises</button>
+                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{ex?.name || "Exercise"}</div>
+                    {sessions.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No history for this exercise yet.</p>}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {sessions.map((h) => {
+                        const entry = h.exercises.find((e) => e.exerciseId === historyExerciseId);
+                        const best = entry.sets.reduce((b, s) => (s.weight > (b?.weight || 0) ? s : b), null);
+                        const volume = entry.sets.reduce((v, s) => v + s.weight * s.reps, 0);
+                        return (
+                          <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
+                            <span style={{ fontSize: 11, color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+                            <span style={{ fontSize: 12, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{best ? `${best.weight} × ${best.reps}` : "-"}</span>
+                            <span style={{ fontSize: 10, color: accent }}>{volume} vol</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })() : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>By exercise</div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {[...new Set(workoutHistory.flatMap((h) => h.exercises.map((e) => e.exerciseId)))].map((exId) => {
+                        const ex = findExercise(exId, customExercises);
+                        return <button key={exId} onClick={() => setHistoryExerciseId(exId)} className="qlog-btn" style={{ fontSize: 11, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 16, padding: "5px 10px", color: "#8A8578", cursor: "pointer" }}>{ex?.name || "?"}</button>;
+                      })}
+                      {workoutHistory.length === 0 && <span style={{ fontSize: 11, color: "#5C6773" }}>Complete a workout to see progress here.</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sessions</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {workoutHistory.map((h) => (
+                        <div key={h.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
+                          <div onClick={() => setExpandedHistoryId(expandedHistoryId === h.id ? null : h.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3" }}>{h.planName}</div>
+                              <div style={{ fontSize: 10, color: "#5C6773" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} · {fmtTime(h.durationSeconds)} · {h.totalVolume} vol</div>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{h.xpEarned} XP</span>
+                              <button onClick={(e) => { e.stopPropagation(); deleteWorkoutHistoryEntry(h.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><Trash2 size={12} /></button>
+                            </div>
+                          </div>
+                          {expandedHistoryId === h.id && (
+                            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                              {h.exercises.map((e, i) => (
+                                <div key={i} style={{ fontSize: 11, color: "#8A8578" }}>{e.name}: {e.sets.map((s, j) => <span key={j} style={{ marginRight: 6, fontFamily: "ui-monospace, Menlo, monospace" }}>{s.weight}×{s.reps}</span>)}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {workoutHistory.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No workouts completed yet.</p>}
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+        )}
+
         {/* Gear */}
         {activeTab === "gear" && (
           <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 20 }}>
@@ -2453,6 +2947,57 @@ export default function App() {
                   </button>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Exercise picker */}
+        {exercisePickerFor && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => { setExercisePickerFor(null); setCustomExerciseForm(null); }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto", position: "relative" }}>
+              <button onClick={() => { setExercisePickerFor(null); setCustomExerciseForm(null); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+              <h3 style={{ margin: "0 0 10px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Add Exercise</h3>
+              <input value={exercisePickerFilter.q} onChange={(e) => setExercisePickerFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search exercises..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+                <button onClick={() => setExercisePickerFilter((f) => ({ ...f, muscle: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exercisePickerFilter.muscle ? accent : "#33414F"}`, background: !exercisePickerFilter.muscle ? accent : "transparent", color: !exercisePickerFilter.muscle ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All muscles</button>
+                {MUSCLE_GROUPS.map((m) => (
+                  <button key={m} onClick={() => setExercisePickerFilter((f) => ({ ...f, muscle: f.muscle === m ? null : m }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exercisePickerFilter.muscle === m ? accent : "#33414F"}`, background: exercisePickerFilter.muscle === m ? accent : "transparent", color: exercisePickerFilter.muscle === m ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{MUSCLE_LABELS[m]}</button>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+                <button onClick={() => setExercisePickerFilter((f) => ({ ...f, equipment: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exercisePickerFilter.equipment ? accent : "#33414F"}`, background: !exercisePickerFilter.equipment ? accent : "transparent", color: !exercisePickerFilter.equipment ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All equipment</button>
+                {EQUIPMENT_TYPES.map((eq) => (
+                  <button key={eq} onClick={() => setExercisePickerFilter((f) => ({ ...f, equipment: f.equipment === eq ? null : eq }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exercisePickerFilter.equipment === eq ? accent : "#33414F"}`, background: exercisePickerFilter.equipment === eq ? accent : "transparent", color: exercisePickerFilter.equipment === eq ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{EQUIPMENT_LABELS[eq]}</button>
+                ))}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto", marginBottom: 10 }}>
+                {[...EXERCISE_CATALOGUE, ...customExercises]
+                  .filter((ex) => (!exercisePickerFilter.muscle || ex.muscleGroups.includes(exercisePickerFilter.muscle)) && (!exercisePickerFilter.equipment || ex.equipment === exercisePickerFilter.equipment) && (!exercisePickerFilter.q || ex.name.toLowerCase().includes(exercisePickerFilter.q.toLowerCase())))
+                  .map((ex) => (
+                    <button key={ex.id} onClick={() => addExerciseToPlan(exercisePickerFor, ex.id)} className="qlog-btn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}>
+                      <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex.name}</span>
+                      <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
+                    </button>
+                  ))}
+              </div>
+              {customExerciseForm ? (
+                <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                  <input value={customExerciseForm.name} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, name: e.target.value }))} placeholder="Exercise name" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <select value={customExerciseForm.primaryMuscle || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, primaryMuscle: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
+                      <option value="">Muscle...</option>
+                      {MUSCLE_GROUPS.map((m) => <option key={m} value={m}>{MUSCLE_LABELS[m]}</option>)}
+                    </select>
+                    <select value={customExerciseForm.equipment || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, equipment: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
+                      <option value="">Equipment...</option>
+                      {EQUIPMENT_TYPES.map((eq) => <option key={eq} value={eq}>{EQUIPMENT_LABELS[eq]}</option>)}
+                    </select>
+                  </div>
+                  <button onClick={() => { const id = addCustomExercise(customExerciseForm); if (id) addExerciseToPlan(exercisePickerFor, id); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "7px 0", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Add & Use</button>
+                </div>
+              ) : (
+                <button onClick={() => setCustomExerciseForm({ name: "", primaryMuscle: "", equipment: "" })} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px dashed #33414F", borderRadius: 8, padding: "8px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}>+ Add custom exercise</button>
+              )}
             </div>
           </div>
         )}
@@ -2550,6 +3095,13 @@ export default function App() {
                 ))}
               </div>
 
+              {/* Workout settings */}
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>WORKOUT</p>
+              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", borderRadius: 10, padding: "10px 14px", marginBottom: 20, cursor: "pointer" }}>
+                <span style={{ fontSize: 12, color: "#EDE4D3" }}>Auto-start rest timer after logging a set</span>
+                <input type="checkbox" checked={autoRestTimer} onChange={(e) => setAutoRestTimer(e.target.checked)} />
+              </label>
+
               {/* XP multiplier breakdown */}
               <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>HOW XP MULTIPLIERS WORK</p>
               <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}>
@@ -2591,6 +3143,13 @@ export default function App() {
                   </div>
                 </>
               )}
+
+              {/* Account */}
+              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>ACCOUNT</p>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", borderRadius: 10, padding: "10px 14px", marginBottom: 20 }}>
+                <span style={{ fontSize: 12, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email}</span>
+                <button onClick={logOut} className="qlog-btn" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#8A8578", cursor: "pointer" }}>Log Out</button>
+              </div>
 
               {/* Clear all data */}
               <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>DANGER ZONE</p>
@@ -2781,6 +3340,7 @@ export default function App() {
           { key: "home", label: "Home", Icon: IconHome },
           { key: "quests", label: "Quests", Icon: IconCalendar },
           { key: "habits", label: "Habits", Icon: Repeat },
+          { key: "workout", label: "Workout", Icon: IconDumbbell },
           { key: "gear", label: "Gear", Icon: IconShield },
         ].map(({ key, label, Icon }) => (
           <button key={key} onClick={() => { setActiveTab(key); setFabMenuOpen(false); }} className="qlog-btn" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", padding: "9px 0 8px", cursor: "pointer", color: activeTab === key ? accent : "#8A8578" }}>
@@ -2791,4 +3351,21 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+export default function App() {
+  const [authUser, setAuthUser] = useState(undefined); // undefined = checking, null = logged out, object = logged in
+
+  useEffect(() => {
+    const unsub = onAuthChange(setAuthUser);
+    return unsub;
+  }, []);
+
+  if (authUser === undefined) {
+    return <div style={{ minHeight: "100vh", background: "#141C27" }} />;
+  }
+  if (!authUser) {
+    return <AuthScreen />;
+  }
+  return <AppContent key={authUser.uid} user={authUser} />;
 }
