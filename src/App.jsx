@@ -1094,8 +1094,6 @@ export default function App() {
     setGold(0);
     setStreak(0);
     setLastActiveDate(null);
-    setWeeklyCompletedCount(0);
-    setWeeklyBonusClaimed(false);
     setWeeklyBossId(null);
     setInventory(["theme_ember", "wpn_sword"]);
     setEquipped({ ...DEFAULT_GEAR });
