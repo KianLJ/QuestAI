@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3,
   Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2,
-  Timer, Loader2, Edit2, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
+  Timer, Loader2, Edit2, IconHome, IconCalendar, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
   IconTitle, IconPalette,
 } from "./icons";
 import {
@@ -431,6 +431,8 @@ export default function App() {
   const [habitXpPop, setHabitXpPop] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [, setClockTick] = useState(0);
+  const [activeTab, setActiveTab] = useState("home"); // "home" | "quests" | "habits" | "gear"
+  const [fabMenuOpen, setFabMenuOpen] = useState(false);
 
   // Calendar state
   const [calView, setCalView] = useState("week"); // "day" | "week" | "month"
@@ -773,6 +775,14 @@ export default function App() {
   const completedTodayCount = quests.filter((q) => q.completed && q.completedAt === today).length;
   const comboPctActive = comboBonusPct(completedTodayCount + 1);
   const streakPctActive = streakBonusPct(streak);
+
+  // ---- Home tab snapshot data ----
+  const todayQuestsTotal = quests.filter((q) => q.date === today).length;
+  const todayHabitsDone = habits.filter((h) => h.lastCompletedDate === today).length;
+  const weekCompletedQuests = quests.filter((q) => q.completed && q.completedAt >= weekStart);
+  const weekXP = weekCompletedQuests.reduce((sum, q) => sum + (q.xp || 0), 0);
+  const recentCompleted = quests.filter((q) => q.completed && q.completedAt).sort((a, b) => (a.completedAt < b.completedAt ? 1 : a.completedAt > b.completedAt ? -1 : b.id - a.id)).slice(0, 5);
+  const recentDateLabel = (d) => d === today ? "Today" : d === yesterdayStr() ? "Yesterday" : parseLocalDate(d).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 
   // ---- Calendar helpers ----
   function getWeekDates(anchorDate) {
@@ -1621,7 +1631,7 @@ export default function App() {
 
   // ---- Render ----
   return (
-    <div className="safe-top safe-bottom" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 60 }}>
+    <div className="safe-top" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84 }}>
       <style>{`
         * { box-sizing: border-box; }
         .qlog-btn { transition: transform 0.12s ease; }
@@ -1976,23 +1986,25 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span>{(() => { const w = ITEM_CATALOGUE.find((i) => i.id === equipped.weapon); return w ? w.icon(accent) : <Sword size={22} color={accent} />; })()}</span>
             <div>
-              <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>Quest Log</h1>
-              {(equipped.badge || equipped.title) && (
-                <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 1 }}>
-                  {equipped.badge && <span>{(() => { const b = ITEM_CATALOGUE.find((i) => i.id === equipped.badge); return b ? b.icon(RARITIES[b.rarity].color) : null; })()}</span>}
-                  {equipped.title && <span style={{ fontSize: 10, color: accent, fontWeight: 600 }}>{ITEM_CATALOGUE.find((i) => i.id === equipped.title)?.value}</span>}
-                </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>Quest Log</h1>
+                {equipped.badge && <span>{(() => { const b = ITEM_CATALOGUE.find((i) => i.id === equipped.badge); return b ? b.icon(RARITIES[b.rarity].color) : null; })()}</span>}
+              </div>
+              {equipped.title && (
+                <span style={{ fontSize: 10, color: accent, fontWeight: 600 }}>{ITEM_CATALOGUE.find((i) => i.id === equipped.title)?.value}</span>
               )}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button onClick={() => setCrateModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
+            <button onClick={() => setSettingsOpen(true)} aria-label="Settings" className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, width: 30, height: 30, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /></button>
           </div>
         </div>
 
-        {/* XP / Streak + Action buttons */}
+        {/* XP / Streak (Home tab) */}
+        {activeTab === "home" && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-          <div style={{ flex: "1 1 200px", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+          <div style={{ flex: "1 1 100%", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span onClick={() => {
@@ -2041,25 +2053,103 @@ export default function App() {
             </div>
           </div>
 
-          {/* Action buttons panel */}
-          <div style={{ flex: "1 1 200px", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-            <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}><Plus size={15} /> Add Quest</button>
-            <button onClick={() => setDumpModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: "pointer" }}><FileText size={14} /> Brain Dump</button>
+          {bossQuest && (
+            <div style={{ flex: "1 1 100%", display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", background: "rgba(138,95,191,0.1)", borderRadius: 8, border: "1px solid #8A5FBF" }}>
+              <Crown size={12} color="#8A5FBF" />
+              <span style={{ fontSize: 11, color: "#8A5FBF", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}</span>
+              <button onClick={() => setWeeklyBossId(null)} style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 0 }}><X size={12} /></button>
+            </div>
+          )}
+        </div>
+        )}
+        </div>{/* end header gradient */}
 
-            <button onClick={() => setSettingsOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /> Settings</button>
-            {bossQuest && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", background: "rgba(138,95,191,0.1)", borderRadius: 6, border: "1px solid #8A5FBF" }}>
-                <Crown size={12} color="#8A5FBF" />
-                <span style={{ fontSize: 11, color: "#8A5FBF", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}</span>
-                <button onClick={() => setWeeklyBossId(null)} style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 0 }}><X size={12} /></button>
+        {/* Home tab snapshot cards */}
+        {activeTab === "home" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+            {/* Today at a glance */}
+            <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Today at a glance</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setActiveTab("quests")} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
+                  <IconCalendar size={16} color={accent} />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{completedTodayCount}/{todayQuestsTotal}</div>
+                    <div style={{ fontSize: 10, color: "#8A8578" }}>Quests today</div>
+                  </div>
+                </button>
+                <button onClick={() => setActiveTab("habits")} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
+                  <Repeat size={16} color={accent} />
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{todayHabitsDone}/{habits.length}</div>
+                    <div style={{ fontSize: 10, color: "#8A8578" }}>Habits today</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* This week */}
+            <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>This week</div>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{weekCompletedQuests.length}</div>
+                  <div style={{ fontSize: 10, color: "#8A8578" }}>Quests completed</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{weekXP} XP</div>
+                  <div style={{ fontSize: 10, color: "#8A8578" }}>Earned this week</div>
+                </div>
+                {bossQuest && (
+                  <div style={{ flex: 1, minWidth: 140, display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", background: "rgba(138,95,191,0.1)", borderRadius: 6, border: "1px solid #8A5FBF" }}>
+                    <Crown size={12} color="#8A5FBF" />
+                    <span style={{ fontSize: 11, color: "#8A5FBF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}{bossQuest.completed ? " ✓ ready" : ""}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Equipped gear preview */}
+            <button onClick={() => setActiveTab("gear")} className="qlog-btn" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</span>
+                <span style={{ fontSize: 10, color: "#5C6773" }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {GEAR_SLOTS.map((slot) => {
+                  const item = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
+                  const rar = item ? RARITIES[item.rarity] : null;
+                  return (
+                    <div key={slot} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: item ? rar.glow : "#1F2836", border: `1px solid ${item ? rar.color : "#2C3947"}`, borderRadius: 8, padding: "7px 4px" }}>
+                      <div style={{ height: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>{item ? item.icon(rar.color) : <Plus size={12} color="#33414F" />}</div>
+                      <span style={{ fontSize: 8, fontWeight: 700, color: item ? rar.color : "#4A5563", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{item ? item.label : SLOT_LABELS[slot]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </button>
+
+            {/* Recent activity */}
+            {recentCompleted.length > 0 && (
+              <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent activity</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {recentCompleted.map((q) => (
+                    <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                      <Check size={11} color="#4C9A6A" />
+                      <span style={{ flex: 1, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.title}</span>
+                      <span style={{ fontSize: 10, color: "#5C6773" }}>{recentDateLabel(q.completedAt)}</span>
+                      <span style={{ fontSize: 10, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{q.xp}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-        </div>
-        </div>{/* end header gradient */}
+        )}
 
-        {/* Dev mode panel — tap level 5x to toggle */}
-        {devMode && (
+        {/* Dev mode panel — tap level 5x to toggle (Home tab) */}
+        {activeTab === "home" && devMode && (
           <div style={{ background: "#0D1117", border: "2px dashed #C9A227", borderRadius: 10, padding: "12px 14px", marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <span style={{ fontSize: 11, fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace" }}>⚗ DEV MODE</span>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -2090,6 +2180,8 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === "quests" && (
+        <>
         {/* Calendar header */}
         <div style={{ marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
@@ -2270,16 +2362,17 @@ export default function App() {
             <span style={{ fontSize: 13, fontWeight: 600, color: dragOverTrash ? "#B33A3A" : "#8A2E44" }}>Drop here to delete</span>
           </div>
         )}
+        </>
+        )}
 
-        {/* Daily Habits + Gear */}
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, marginBottom: 20 }}>
-          {/* Daily Habits */}
-          <div style={{ flex: "1 1 320px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10 }}>
+        {/* Daily Habits */}
+        {activeTab === "habits" && (
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>Daily Habits</span>
               <span style={{ fontSize: 9, color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 4, marginBottom: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 4, marginBottom: 8 }}>
               {habits.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>No habits yet — add one below.</p>}
               {habits.map((h) => {
                 const doneToday = h.lastCompletedDate === today;
@@ -2319,9 +2412,11 @@ export default function App() {
               <button onClick={() => addHabit(newHabitName, newHabitDeadline)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 8px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={13} color="#1B2430" /></button>
             </div>
           </div>
+        )}
 
-          {/* Gear */}
-          <div style={{ flex: "1 1 260px", background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10 }}>
+        {/* Gear */}
+        {activeTab === "gear" && (
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 20 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>⚔ Gear</span>
               <span style={{ fontSize: 9, color: "#5C6773", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
@@ -2343,7 +2438,7 @@ export default function App() {
               {(playerStats.bonusAtk || 0) > 0 && <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>+{playerStats.bonusAtk} ATK</span>}
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 6 }}>
               {SLOTS.map((slot) => {
                 const equippedItem = equipped[slot] ? ITEM_CATALOGUE.find((i) => i.id === equipped[slot]) : null;
                 const rar = equippedItem ? RARITIES[equippedItem.rarity] : null;
@@ -2360,7 +2455,7 @@ export default function App() {
               })}
             </div>
           </div>
-        </div>
+        )}
 
         {/* Modals */}
         {addModalOpen && (
@@ -2667,6 +2762,32 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Floating Add-Quest / Brain-Dump menu */}
+      {fabMenuOpen && (
+        <div style={{ position: "fixed", right: 16, bottom: 148, zIndex: 61, display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><Plus size={15} /> Add Quest</button>
+          <button onClick={() => { setDumpModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><FileText size={14} /> Brain Dump</button>
+        </div>
+      )}
+      <button onClick={() => setFabMenuOpen((v) => !v)} aria-label="Add" className="qlog-btn" style={{ position: "fixed", right: 16, bottom: 76, zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.4)", transform: fabMenuOpen ? "rotate(45deg)" : "none", transition: "transform 0.15s ease" }}>
+        <Plus size={24} color="#1B2430" />
+      </button>
+
+      {/* Bottom tab bar */}
+      <div className="safe-bottom" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, background: themePersonality.cardBase, borderTop: `1px solid ${themePersonality.borderCol}`, display: "flex" }}>
+        {[
+          { key: "home", label: "Home", Icon: IconHome },
+          { key: "quests", label: "Quests", Icon: IconCalendar },
+          { key: "habits", label: "Habits", Icon: Repeat },
+          { key: "gear", label: "Gear", Icon: IconShield },
+        ].map(({ key, label, Icon }) => (
+          <button key={key} onClick={() => { setActiveTab(key); setFabMenuOpen(false); }} className="qlog-btn" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", padding: "9px 0 8px", cursor: "pointer", color: activeTab === key ? accent : "#8A8578" }}>
+            <Icon size={19} color={activeTab === key ? accent : "#8A8578"} />
+            <span style={{ fontSize: 10, fontWeight: activeTab === key ? 700 : 500 }}>{label}</span>
+          </button>
+        ))}
       </div>
     </div>
   );
