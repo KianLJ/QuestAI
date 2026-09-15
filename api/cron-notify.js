@@ -41,6 +41,24 @@ async function firestoreGet(token, docPath) {
   return resp.json();
 }
 
+// Lists every per-user doc in the "storage" collection (one per signed-up
+// user, keyed by their Firebase Auth uid), handling pagination.
+async function firestoreListAll(token, collectionPath) {
+  const docs = [];
+  let pageToken = null;
+  do {
+    const url = new URL(`https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}`);
+    url.searchParams.set("pageSize", "300");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) throw new Error(`Firestore LIST failed: ${resp.status} ${await resp.text()}`);
+    const data = await resp.json();
+    docs.push(...(data.documents || []));
+    pageToken = data.nextPageToken || null;
+  } while (pageToken);
+  return docs;
+}
+
 function extractSubscription(doc) {
   const sub = doc?.fields?.pushSubscription?.mapValue?.fields;
   if (!sub) return null;
@@ -63,30 +81,7 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default async function handler(req, res) {
-  if (req.headers["authorization"] !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const today = todayStr();
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const dayOfWeek = now.getUTCDay();
-  const dayKey = ["sun","mon","tue","wed","thu","fri","sat"][dayOfWeek];
-  const force     = req.query?.force === "1";
-  const isMidday  = force || utcHour === 11;
-  const isEvening = force || utcHour === 19;
-  const isMonday  = force || dayOfWeek === 1;
-
-  const token = await getAccessToken();
-  const doc = await firestoreGet(token, "storage/main");
-
-  const subscription = extractSubscription(doc);
-  if (!subscription) return res.status(200).json({ sent: 0, reason: "no subscription" });
-
-  const appData = extractAppData(doc);
-  if (!appData) return res.status(200).json({ sent: 0, reason: "no app data" });
-
+function buildNotifications(appData, { today, isMidday, isEvening, isMonday }) {
   const quests        = appData.quests || [];
   const habits        = appData.habits || [];
   const pendingBattle = appData.pendingBattle;
@@ -140,15 +135,45 @@ export default async function handler(req, res) {
     });
   }
 
-  let sent = 0;
-  for (const payload of notifications) {
-    try {
-      await webpush.sendNotification(subscription, JSON.stringify({ ...payload, url: "/" }));
-      sent++;
-    } catch (err) {
-      console.error("Push error:", err.message);
-    }
+  return { notifications, incompleteHabitsCount: incompleteHabits.length, overdueQuestsCount: quests.filter((q) => !q.completed && q.date === today).length };
+}
+
+export default async function handler(req, res) {
+  if (req.headers["authorization"] !== `Bearer ${process.env.CRON_SECRET}`) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
-  return res.status(200).json({ sent, checked: { habits: incompleteHabits.length, quests: quests.filter(q => !q.completed && q.date === today).length } });
+  const today = todayStr();
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  const dayOfWeek = now.getUTCDay();
+  const force     = req.query?.force === "1";
+  const isMidday  = force || utcHour === 11;
+  const isEvening = force || utcHour === 19;
+  const isMonday  = force || dayOfWeek === 1;
+
+  const token = await getAccessToken();
+  const docs = await firestoreListAll(token, "storage");
+
+  let sent = 0;
+  let usersNotified = 0;
+  for (const doc of docs) {
+    const subscription = extractSubscription(doc);
+    if (!subscription) continue;
+    const appData = extractAppData(doc);
+    if (!appData) continue;
+
+    const { notifications } = buildNotifications(appData, { today, isMidday, isEvening, isMonday });
+    for (const payload of notifications) {
+      try {
+        await webpush.sendNotification(subscription, JSON.stringify({ ...payload, url: "/" }));
+        sent++;
+      } catch (err) {
+        console.error("Push error:", err.message);
+      }
+    }
+    if (notifications.length > 0) usersNotified++;
+  }
+
+  return res.status(200).json({ sent, usersNotified, usersChecked: docs.length });
 }

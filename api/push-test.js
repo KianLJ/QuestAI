@@ -74,9 +74,12 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  const uid = req.query?.uid;
+  if (!uid) return res.status(400).json({ error: "Pass ?uid=<firebase-auth-uid> to test a specific user's subscription" });
+
   try {
     const token = await getAccessToken();
-    const doc = await firestoreGet(token, "storage/main");
+    const doc = await firestoreGet(token, `storage/${uid}`);
 
     const subField = doc?.fields?.pushSubscription;
     if (!subField?.mapValue?.fields) {

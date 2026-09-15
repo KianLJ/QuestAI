@@ -1,12 +1,34 @@
+import { initializeApp, getApps, cert } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
+
 export const maxDuration = 60;
 
 const MODELS = [
   "gemini-3.5-flash-lite"
 ];
 
+if (!getApps().length) {
+  initializeApp({
+    credential: cert({
+      projectId:   process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+    }),
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const authHeader = req.headers["authorization"] || "";
+  const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!idToken) return res.status(401).json({ error: "Missing auth token" });
+  try {
+    await getAuth().verifyIdToken(idToken);
+  } catch (e) {
+    return res.status(401).json({ error: "Invalid or expired auth token" });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
