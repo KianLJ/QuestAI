@@ -42,6 +42,138 @@ const PERFECT_DAY_XP = 10;
 const WORKOUT_SET_XP = 2;
 const WORKOUT_COMPLETE_XP = 20;
 const DEFAULT_WORKOUT_SCHEDULE = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
+
+// ---- Exercise rank system ----
+// Each exercise gets an all-time best "score" (estimated 1-rep max for weighted lifts,
+// reps-adjusted for bodyweight moves), which places it on a 10-tier x 3-sublevel ladder
+// (30 ranks total). Thresholds grow exponentially per rank so the top tiers take
+// meaningfully more progress than the bottom ones.
+const RANK_TIER_NAMES = ["Bronze", "Iron", "Silver", "Gold", "Platinum", "Diamond", "Master", "Grandmaster", "Champion", "Legend"];
+const RANK_TIER_COLORS = ["#A9673A", "#8B8D91", "#B9C0C9", "#D4AF37", "#4FB0C6", "#5B8DEF", "#8A5FBF", "#C1652B", "#E0455A", "#C9A227"];
+const RANK_SUBLABELS = ["III", "II", "I"];
+const TOTAL_RANKS = RANK_TIER_NAMES.length * RANK_SUBLABELS.length; // 30
+
+function shadeColor(hex, percent) {
+  const num = parseInt(hex.replace("#", ""), 16);
+  const clamp = (v) => Math.max(0, Math.min(255, v));
+  const r = clamp((num >> 16) + Math.round(255 * percent));
+  const g = clamp(((num >> 8) & 0xff) + Math.round(255 * percent));
+  const b = clamp((num & 0xff) + Math.round(255 * percent));
+  return "#" + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+}
+
+const UNRANKED_COLOR = "#5C6773";
+
+function rankInfo(idx) {
+  if (idx == null || idx < 0) {
+    return { idx: -1, label: "Unranked", tier: null, sub: null, color: UNRANKED_COLOR, isMax: false, unranked: true };
+  }
+  const clamped = Math.max(0, Math.min(idx, TOTAL_RANKS - 1));
+  const tierIdx = Math.floor(clamped / 3);
+  const subIdx = clamped % 3;
+  // Each of the 30 ranks gets its own shade — tier sets the hue, sub-level (III/II/I) lightens it.
+  const color = shadeColor(RANK_TIER_COLORS[tierIdx], (subIdx - 1) * 0.13);
+  return { idx: clamped, label: `${RANK_TIER_NAMES[tierIdx]} ${RANK_SUBLABELS[subIdx]}`, tier: RANK_TIER_NAMES[tierIdx], sub: RANK_SUBLABELS[subIdx], color, isMax: clamped === TOTAL_RANKS - 1, unranked: false };
+}
+
+function getExerciseRankProfile(ex) {
+  if (!ex) return null;
+  const nameLower = (ex.name || "").toLowerCase();
+  if (ex.equipment === "bodyweight") {
+    const hard = /pull-up|chin-up|\bdip\b|muscle-up|pistol/.test(nameLower);
+    const easy = ["quads", "glutes", "calves"].includes(ex.primaryMuscle);
+    const base = hard ? 3 : easy ? 12 : 8;
+    const growth = hard ? 1.24 : 1.19;
+    return { mode: "reps", base, growth };
+  }
+  const compound = (ex.muscleGroups?.length || 1) >= 3;
+  const BODYPART_BASE = { chest: 30, back: 32, shoulders: 16, quads: 40, hamstrings: 28, glutes: 32, biceps: 8, triceps: 10, calves: 18, abs: 6, forearms: 6, traps: 16, cardio: 6 };
+  const base = Math.max(3, (BODYPART_BASE[ex.primaryMuscle] || 15) * (compound ? 1 : 0.55));
+  const growth = compound ? 1.155 : 1.135;
+  return { mode: "1rm", base, growth };
+}
+
+function computeSetScore(profile, weight, reps) {
+  if (!profile) return 0;
+  const w = Number(weight) || 0, r = Number(reps) || 0;
+  if (r <= 0) return 0;
+  if (profile.mode === "reps") return r + w * 0.5;
+  if (w <= 0) return 0;
+  return w * (1 + r / 30); // Epley estimated 1RM
+}
+
+function bestScoreForExercise(exerciseId, history, profile) {
+  let best = 0;
+  for (const h of history || []) {
+    const entry = h.exercises?.find((e) => e.exerciseId === exerciseId);
+    if (!entry) continue;
+    for (const s of entry.sets || []) {
+      const score = computeSetScore(profile, s.weight, s.reps);
+      if (score > best) best = score;
+    }
+  }
+  return best;
+}
+
+// From Master III (idx 18) onward, thresholds grow at only 10% of the normal rate —
+// otherwise 30 ranks of pure compounding makes the top tiers require absurd numbers
+// (e.g. an 800kg+ bench). This keeps Bronze-through-Diamond feeling like real
+// progression while Master-through-Legend stays a plausible, if elite, ceiling.
+const RANK_FLATTEN_FROM = 18;
+const RANK_FLATTEN_FACTOR = 0.10;
+
+function rankThreshold(profile, idx) {
+  if (!profile || idx <= 0) return profile?.base || 0;
+  const cut = Math.min(idx, RANK_FLATTEN_FROM);
+  let mult = Math.pow(profile.growth, cut);
+  if (idx > RANK_FLATTEN_FROM) {
+    const flatGrowth = 1 + (profile.growth - 1) * RANK_FLATTEN_FACTOR;
+    mult *= Math.pow(flatGrowth, idx - RANK_FLATTEN_FROM);
+  }
+  return profile.base * mult;
+}
+
+function rankIndexForScore(score, profile) {
+  if (!profile || score <= 0) return 0;
+  let idx = 0;
+  while (idx < TOTAL_RANKS - 1 && score >= rankThreshold(profile, idx + 1)) idx++;
+  return idx;
+}
+
+function rankProgress(score, profile, idx) {
+  if (!profile || idx >= TOTAL_RANKS - 1) return 1;
+  const cur = rankThreshold(profile, idx);
+  const next = rankThreshold(profile, idx + 1);
+  return Math.max(0, Math.min(1, (score - cur) / (next - cur)));
+}
+
+function computeExerciseRankRows(history, customExercises) {
+  const attemptedIds = [...new Set((history || []).flatMap((h) => (h.exercises || []).map((e) => e.exerciseId)))];
+  return attemptedIds.map((id) => {
+    const ex = findExercise(id, customExercises);
+    const profile = getExerciseRankProfile(ex);
+    const score = bestScoreForExercise(id, history, profile);
+    const idx = rankIndexForScore(score, profile);
+    const info = rankInfo(idx);
+    const progress = rankProgress(score, profile, idx);
+    return { id, ex, profile, score, idx, info, progress };
+  }).sort((a, b) => b.idx - a.idx || (a.ex?.name || "").localeCompare(b.ex?.name || ""));
+}
+
+// Overall rank rewards being strong across several exercises (not just one lucky lift) — it
+// averages your best ranks (capped, so a handful of good lifts is enough to place well) plus
+// a small, capped bonus for having ranked in a wide variety of exercises.
+function computeOverallRank(rows) {
+  if (!rows || rows.length === 0) return null;
+  const continuous = rows.map((r) => r.idx + r.progress).sort((a, b) => b - a);
+  const top = continuous.slice(0, Math.min(8, continuous.length));
+  const avg = top.reduce((s, v) => s + v, 0) / top.length;
+  const breadthBonus = Math.min(rows.length, 15) * 0.08;
+  const combined = Math.max(0, Math.min(TOTAL_RANKS - 0.001, avg + breadthBonus));
+  const idx = Math.min(TOTAL_RANKS - 1, Math.floor(combined));
+  const progress = Math.max(0, Math.min(1, combined - idx));
+  return { idx, progress, info: rankInfo(idx), exerciseCount: rows.length };
+}
 // ---- Enemy SVG silhouettes ----
 // ---- Aura particle component ----
 function AuraParticles({ color, type }) {
@@ -513,6 +645,15 @@ function SettingsSection({ title, defaultOpen = false, children }) {
   );
 }
 
+function InfoButton({ onClick, accent = "#C9A227", size = 13 }) {
+  return (
+    <button onClick={onClick} aria-label="How to perform" title="How to perform" className="qlog-btn"
+      style={{ width: size + 11, height: size + 11, borderRadius: "50%", background: accent + "20", border: `1px solid ${accent}55`, color: accent, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, flexShrink: 0, lineHeight: 1 }}>
+      <Info size={size} />
+    </button>
+  );
+}
+
 function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete }) {
   const [weight, setWeight] = useState(set.weight || "");
   const [reps, setReps] = useState(set.reps || "");
@@ -605,6 +746,8 @@ function AppContent({ user }) {
   const [guideLoadingId, setGuideLoadingId] = useState(null);
   const [guideError, setGuideError] = useState(null);
   const [exerciseBrowseFilter, setExerciseBrowseFilter] = useState({ muscle: null, equipment: null, q: "" });
+  const [rankLeaderboardId, setRankLeaderboardId] = useState(null);
+  const [rankInfoModalOpen, setRankInfoModalOpen] = useState(false);
 
   // Calendar state
   const [calView, setCalView] = useState("week"); // "day" | "week" | "month"
@@ -1599,10 +1742,11 @@ function AppContent({ user }) {
   }
 
   useEffect(() => {
-    if (activeTab !== "friends" || !myUsername) return;
+    const wantsFriendsData = activeTab === "friends" || (activeTab === "workout" && activeWorkoutTab === "ranks");
+    if (!wantsFriendsData || !myUsername) return;
     refreshFriends();
     refreshFriendRequests();
-  }, [activeTab, myUsername, friendsRefreshTick]);
+  }, [activeTab, activeWorkoutTab, myUsername, friendsRefreshTick]);
 
   async function handleSendFriendRequest() {
     if (friendSearchBusy || !friendSearchInput.trim()) return;
@@ -2516,7 +2660,7 @@ function AppContent({ user }) {
             {workoutSession.exercises.map((ex, exIdx) => (
               <div key={exIdx} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 5 }}>{ex.name} <button onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} aria-label="How to perform" title="How to perform" style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={13} /></button></span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
                   <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -2728,6 +2872,69 @@ function AppContent({ user }) {
                 )}
               </div>
             </div>
+
+            {/* Workout summary */}
+            {(() => {
+              const rankRows = computeExerciseRankRows(workoutHistory, customExercises);
+              const overall = computeOverallRank(rankRows) || { info: rankInfo(-1) };
+              const top = [...rankRows].sort((a, b) => (b.idx + b.progress) - (a.idx + a.progress)).slice(0, 3);
+              const weakest = rankRows.length > 3 ? [...rankRows].sort((a, b) => (a.idx + a.progress) - (b.idx + b.progress)).slice(0, 3) : [];
+              const sessionsThisWeek = workoutHistory.filter((h) => h.date >= weekStart).length;
+              const lastSession = workoutHistory[0];
+              return (
+                <div onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Workout summary</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: overall.info.color, background: overall.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>
+                      {overall.info.unranked ? <IconShield size={11} color={overall.info.color} /> : <Trophy size={11} color={overall.info.color} />}
+                      {overall.info.label}
+                    </span>
+                  </div>
+
+                  {workoutHistory.length > 0 && (
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{sessionsThisWeek}</div>
+                      <div style={{ fontSize: 10, color: "#8A8578" }}>Sessions this week</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{workoutHistory.length}</div>
+                      <div style={{ fontSize: 10, color: "#8A8578" }}>Total workouts</div>
+                    </div>
+                    {lastSession && (
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{parseLocalDate(lastSession.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</div>
+                        <div style={{ fontSize: 10, color: "#8A8578" }}>Last workout</div>
+                      </div>
+                    )}
+                  </div>
+                  )}
+
+                  {top.length > 0 && (
+                    <div style={{ marginBottom: weakest.length > 0 ? 8 : 0 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Top ranked</div>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {top.map((r) => (
+                          <span key={r.id} style={{ fontSize: 10, color: r.info.color, background: r.info.color + "18", border: `1px solid ${r.info.color}44`, borderRadius: 12, padding: "2px 8px" }}>{r.ex?.name || "?"} · {r.info.label}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {weakest.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Needs work</div>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {weakest.map((r) => (
+                          <span key={r.id} style={{ fontSize: 10, color: "#8A8578", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: "2px 8px" }}>{r.ex?.name || "?"} · {r.info.label}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {rankRows.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Complete a workout to start earning ranks.</p>}
+                </div>
+              );
+            })()}
 
             {/* Equipped gear preview */}
             <button onClick={() => setActiveTab("gear")} className="qlog-btn" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
@@ -3183,7 +3390,31 @@ function AppContent({ user }) {
         {/* Workout */}
         {activeTab === "workout" && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, marginBottom: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: 4 }}>
+            {(() => {
+              const rankRows = computeExerciseRankRows(workoutHistory, customExercises);
+              const overall = computeOverallRank(rankRows) || { info: rankInfo(-1) };
+              const top = [...rankRows].sort((a, b) => (b.idx + b.progress) - (a.idx + a.progress)).slice(0, 3);
+              return (
+                <button onClick={() => setActiveWorkoutTab("ranks")} className="qlog-btn" style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "9px 12px", marginBottom: 10, cursor: "pointer", textAlign: "left" }}>
+                  {overall.info.unranked ? <IconShield size={18} color={overall.info.color} style={{ flexShrink: 0 }} /> : <Trophy size={18} color={overall.info.color} style={{ flexShrink: 0 }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: overall.info.color }}>{overall.info.label}</span>
+                      <span style={{ fontSize: 9, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4 }}>Overall Rank</span>
+                    </div>
+                    {top.length > 0 ? (
+                      <div style={{ fontSize: 10, color: "#8A8578", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        Best: {top.map((r) => r.ex?.name || "?").join(", ")}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 10, color: "#5C6773" }}>Complete a workout to start earning ranks</div>
+                    )}
+                  </div>
+                  <ChevronRight size={14} color="#5C6773" style={{ flexShrink: 0 }} />
+                </button>
+              );
+            })()}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, marginBottom: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: 4 }}>
               {[
                 { key: "today", label: "Today", Icon: Target },
                 { key: "plans", label: "Plans", Icon: FileText },
@@ -3191,6 +3422,7 @@ function AppContent({ user }) {
                 { key: "history", label: "History", Icon: Timer },
                 { key: "generate", label: "Generate", Icon: Wand2 },
                 { key: "exercises", label: "Exercises", Icon: IconDumbbell },
+                { key: "ranks", label: "Ranks", Icon: Trophy },
               ].map((t) => {
                 const on = activeWorkoutTab === t.key;
                 return (
@@ -3249,7 +3481,7 @@ function AppContent({ user }) {
                           const ex = findExercise(pe.exerciseId, customExercises);
                           return (
                             <div key={pe.id} style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>{ex?.name || "?"} <button onClick={() => openExerciseGuide(ex)} aria-label="How to perform" title="How to perform" className="qlog-btn" style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={12} /></button></span>
+                              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>{ex?.name || "?"} <InfoButton accent={accent} size={11} onClick={() => openExerciseGuide(ex)} /></span>
                               <span style={{ color: "#5C6773" }}>{pe.sets} × {pe.targetReps}{pe.targetWeight ? ` @ ${pe.targetWeight}` : ""}</span>
                             </div>
                           );
@@ -3291,7 +3523,7 @@ function AppContent({ user }) {
                             return (
                               <div key={pe.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                                  <span style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 5 }}>{ex?.name || "?"} <button onClick={() => openExerciseGuide(ex)} aria-label="How to perform" title="How to perform" style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={12} /></button></span>
+                                  <span style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex?.name || "?"} <InfoButton accent={accent} size={11} onClick={() => openExerciseGuide(ex)} /></span>
                                   <button onClick={() => removePlanExercise(plan.id, pe.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><X size={12} /></button>
                                 </div>
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -3359,7 +3591,7 @@ function AppContent({ user }) {
                     <button onClick={() => setHistoryExerciseId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All exercises</button>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                       <span style={{ fontSize: 14, fontWeight: 700 }}>{ex?.name || "Exercise"}</span>
-                      <button onClick={() => openExerciseGuide(ex)} aria-label="How to perform" title="How to perform" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={14} /></button>
+                      <InfoButton accent={accent} onClick={() => openExerciseGuide(ex)} />
                     </div>
                     {points.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No history for this exercise yet.</p>}
                     {points.length > 0 && (
@@ -3575,23 +3807,110 @@ function AppContent({ user }) {
                     ))}
                   </div>
                   <div style={{ fontSize: 10, color: "#5C6773" }}>{filtered.length} exercise{filtered.length === 1 ? "" : "s"}</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {filtered.map((ex) => (
-                      <button key={ex.id} onClick={() => openExerciseGuide(ex)} className="qlog-btn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
-                        <div>
-                          <div style={{ fontSize: 12.5, color: "#EDE4D3", fontWeight: 600, marginBottom: 2 }}>{ex.name}</div>
-                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                            {ex.muscleGroups.slice(0, 3).map((m) => <span key={m} style={{ fontSize: 9, color: accent, background: accent + "18", borderRadius: 10, padding: "1px 6px" }}>{MUSCLE_LABELS[m]}</span>)}
-                          </div>
+                      <div key={ex.id} style={{ display: "flex", flexDirection: "column", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 4 }}>
+                          <div style={{ fontSize: 12, color: "#EDE4D3", fontWeight: 600, lineHeight: 1.25 }}>{ex.name}</div>
+                          <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(ex)} />
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                          <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
-                          <Info size={14} color="#8A8578" />
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          {ex.muscleGroups.slice(0, 2).map((m) => <span key={m} style={{ fontSize: 9, color: accent, background: accent + "18", borderRadius: 10, padding: "1px 6px" }}>{MUSCLE_LABELS[m]}</span>)}
                         </div>
-                      </button>
+                        <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
+                      </div>
                     ))}
-                    {filtered.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No exercises match those filters.</p>}
+                    {filtered.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", gridColumn: "1 / -1" }}>No exercises match those filters.</p>}
                   </div>
+                </div>
+              );
+            })()}
+
+            {activeWorkoutTab === "ranks" && (() => {
+              const rows = computeExerciseRankRows(workoutHistory, customExercises);
+              const overall = computeOverallRank(rows);
+
+              if (rankLeaderboardId) {
+                const row = rows.find((r) => r.id === rankLeaderboardId);
+                if (!row) {
+                  return (
+                    <div>
+                      <button onClick={() => setRankLeaderboardId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, padding: 0 }}><ChevronLeft size={14} /> All ranks</button>
+                      <p style={{ fontSize: 12, color: "#5C6773", marginTop: 10 }}>No rank data for that exercise yet.</p>
+                    </div>
+                  );
+                }
+                const entries = [{ uid: user.uid, username: myUsername || "You", isSelf: true, score: row.score, idx: row.idx, info: row.info }];
+                Object.entries(friendsData).forEach(([uid, profile]) => {
+                  const friendProfile = getExerciseRankProfile(row.ex);
+                  const friendScore = bestScoreForExercise(rankLeaderboardId, profile.workoutHistory || [], friendProfile);
+                  const friendIdx = friendScore > 0 ? rankIndexForScore(friendScore, friendProfile) : -1;
+                  entries.push({ uid, username: profile.username || "?", isSelf: false, score: friendScore, idx: friendIdx, info: rankInfo(friendIdx) });
+                });
+                entries.sort((a, b) => b.score - a.score);
+                const medals = ["🥇", "🥈", "🥉"];
+                return (
+                  <div>
+                    <button onClick={() => setRankLeaderboardId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All ranks</button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700 }}>{row.ex?.name || "Exercise"}</span>
+                      <InfoButton accent={accent} onClick={() => openExerciseGuide(row.ex)} />
+                    </div>
+                    <div style={{ fontSize: 10, color: "#5C6773", marginBottom: 10 }}>Ranked by {row.profile?.mode === "reps" ? "best reps" : "estimated 1-rep max"}. Friend scores use their last 10 synced sessions.</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {entries.map((e, i) => (
+                        <div key={e.uid} style={{ display: "flex", alignItems: "center", gap: 10, background: e.isSelf ? `${accent}14` : "#1F2836", border: `1px solid ${e.isSelf ? accent : "#2C3947"}`, borderRadius: 8, padding: "8px 10px" }}>
+                          <span style={{ fontSize: 13, width: 22, textAlign: "center", flexShrink: 0 }}>{e.info.unranked ? <IconShield size={13} color={UNRANKED_COLOR} /> : (medals[i] || `#${i + 1}`)}</span>
+                          <span style={{ flex: 1, fontSize: 12, color: "#EDE4D3", fontWeight: e.isSelf ? 700 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.isSelf ? `${e.username} (you)` : e.username}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: e.info.color, background: e.info.color + "22", borderRadius: 10, padding: "2px 8px", flexShrink: 0 }}>{e.info.label}</span>
+                          <span style={{ fontSize: 11, color: "#8A8578", fontFamily: "ui-monospace, Menlo, monospace", flexShrink: 0, width: 44, textAlign: "right" }}>{e.info.unranked ? "—" : Math.round(e.score)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {(() => {
+                    const shown = overall || { info: rankInfo(-1), progress: 0, exerciseCount: 0 };
+                    return (
+                      <div style={{ background: `linear-gradient(135deg, ${shown.info.color}22, #1F2836)`, border: `1px solid ${shown.info.color}66`, borderRadius: 10, padding: "12px 14px", marginBottom: 2 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                          <span style={{ fontSize: 20, fontWeight: 700, color: shown.info.color, fontFamily: "Georgia, serif" }}>{shown.info.label}</span>
+                          {shown.info.unranked ? <IconShield size={22} color={shown.info.color} /> : <Trophy size={22} color={shown.info.color} />}
+                        </div>
+                        <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${shown.info.unranked ? 0 : shown.info.isMax ? 100 : shown.progress * 100}%`, background: shown.info.color, borderRadius: 4 }} />
+                        </div>
+                        <div style={{ fontSize: 9, color: "#5C6773", marginTop: 4 }}>
+                          {shown.info.unranked ? "Complete a workout to start earning ranks" : shown.info.isMax ? "Max rank reached" : `${Math.round(shown.progress * 100)}% to next rank`}
+                          {!shown.info.unranked && ` · from your top ${Math.min(8, shown.exerciseCount)} ranked exercise${Math.min(8, shown.exerciseCount) === 1 ? "" : "s"}`}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                    <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 4px", flex: 1 }}>Ranks are calculated from your all-time best weight and reps per exercise. Tap one to see how you compare to friends.</p>
+                    <button onClick={() => setRankInfoModalOpen(true)} aria-label="How ranks work" title="How ranks work" className="qlog-btn" style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: "3px 9px", fontSize: 10, fontWeight: 700, color: accent, cursor: "pointer" }}>
+                      <Info size={11} /> How ranks work
+                    </button>
+                  </div>
+                  {rows.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>Complete a workout to start earning ranks.</p>}
+                  {rows.map((r) => (
+                    <button key={r.id} onClick={() => setRankLeaderboardId(r.id)} className="qlog-btn" style={{ display: "flex", flexDirection: "column", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 12.5, color: "#EDE4D3", fontWeight: 600 }}>{r.ex?.name || "?"}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: r.info.color, background: r.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>{r.info.label}</span>
+                      </div>
+                      <div style={{ height: 5, background: "#141C27", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${r.info.isMax ? 100 : r.progress * 100}%`, background: r.info.color, borderRadius: 3 }} />
+                      </div>
+                      <span style={{ fontSize: 9, color: "#5C6773" }}>{r.info.isMax ? "Max rank reached" : `${Math.round(r.progress * 100)}% to ${RANK_TIER_NAMES[Math.floor(Math.min(r.idx + 1, TOTAL_RANKS - 1) / 3)]} ${RANK_SUBLABELS[Math.min(r.idx + 1, TOTAL_RANKS - 1) % 3]}`}</span>
+                    </button>
+                  ))}
                 </div>
               );
             })()}
@@ -3704,6 +4023,8 @@ function AppContent({ user }) {
               const friend = friendsData[selectedFriendUid];
               if (!friend) return null;
               const friendLevel = levelFromXP(friend.totalXP || 0);
+              const friendRankRows = computeExerciseRankRows(friend.workoutHistory || [], customExercises);
+              const friendOverall = computeOverallRank(friendRankRows) || { info: rankInfo(-1) };
               return (
                 <div>
                   <button onClick={() => setSelectedFriendUid(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 12, padding: 0 }}><ChevronLeft size={14} /> All friends</button>
@@ -3739,6 +4060,33 @@ function AppContent({ user }) {
                       })}
                     </div>
                   </div>
+
+                  <div style={{ background: `linear-gradient(135deg, ${friendOverall.info.color}22, #1F2836)`, border: `1px solid ${friendOverall.info.color}66`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 17, fontWeight: 700, color: friendOverall.info.color, fontFamily: "Georgia, serif" }}>{friendOverall.info.label}</span>
+                      {friendOverall.info.unranked ? <IconShield size={18} color={friendOverall.info.color} /> : <Trophy size={18} color={friendOverall.info.color} />}
+                    </div>
+                  </div>
+
+                  {friendRankRows.length === 0 && (
+                    <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 10px" }}>No ranked exercises yet — they haven't logged a synced workout.</p>
+                  )}
+
+                  {friendRankRows.length > 0 && (
+                    <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Exercise Ranks</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {friendRankRows.map((r) => (
+                          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: 12, color: "#EDE4D3" }}>{r.ex?.name || "?"}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: r.info.color, background: r.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>{r.info.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: 9, color: "#5C6773", marginTop: 8 }}>Based on their last 10 synced sessions.</div>
+                    </div>
+                  )}
 
                   <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Routines</div>
@@ -3793,10 +4141,15 @@ function AppContent({ user }) {
                       const friend = friendsData[uid];
                       if (!friend) return null;
                       const friendLevel = levelFromXP(friend.totalXP || 0);
+                      const friendOverall = computeOverallRank(computeExerciseRankRows(friend.workoutHistory || [], customExercises)) || { info: rankInfo(-1) };
                       return (
                         <button key={uid} onClick={() => setSelectedFriendUid(uid)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{friend.username}</span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: friendOverall.info.color, background: friendOverall.info.color + "22", borderRadius: 10, padding: "2px 7px" }}>
+                              {friendOverall.info.unranked ? <IconShield size={10} color={friendOverall.info.color} /> : <Trophy size={10} color={friendOverall.info.color} />}
+                              {friendOverall.info.label}
+                            </span>
                             <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>Lv {friendLevel.level}</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: friend.streak > 0 ? "#C1652B" : "#5C6773" }}><Flame size={11} color={friend.streak > 0 ? "#C1652B" : "#5C6773"} /> {friend.streak || 0}d</span>
                           </div>
@@ -3881,7 +4234,7 @@ function AppContent({ user }) {
                         <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex.name}</span>
                         <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
                       </button>
-                      <button onClick={(e) => { e.stopPropagation(); openExerciseGuide(ex); }} aria-label="How to perform" title="How to perform" className="qlog-btn" style={{ flex: "0 0 auto", background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 2 }}><Info size={14} /></button>
+                      <InfoButton accent={accent} onClick={(e) => { e.stopPropagation(); openExerciseGuide(ex); }} />
                     </div>
                   ))}
               </div>
@@ -3946,6 +4299,55 @@ function AppContent({ user }) {
             </div>
           );
         })()}
+
+        {rankInfoModalOpen && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setRankInfoModalOpen(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
+              <button onClick={() => setRankInfoModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+              <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Trophy size={16} color={accent} /> How ranks work</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Tiers</div>
+                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>There are 10 tiers — Bronze, Iron, Silver, Gold, Platinum, Diamond, Master, Grandmaster, Champion, Legend — each split into III, II and I, where I is the best. That's 30 ranks per exercise.</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Your score</div>
+                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Each exercise is ranked from your all-time best logged set. For weighted lifts, that's an estimated 1-rep max from your weight and reps. For bodyweight moves, it's based on reps (with a bonus if you add weight).</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Why exercises differ</div>
+                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>The weight or reps needed to hit each rank depends on the exercise — big compound lifts (squats, deadlifts) need more weight than isolation moves (curls, extensions) to reach the same rank, and harder bodyweight moves (pull-ups, dips) need far fewer reps than easier ones (push-ups, bodyweight squats).</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Getting harder</div>
+                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Each rank needs more than the last, and it compounds — climbing from Bronze to Diamond takes steady progress, but Master through Legend is an elite ceiling that takes real dedication to reach.</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Overall Rank</div>
+                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Your Overall Rank averages your best 8 exercise ranks, plus a small bonus for having ranked in many different exercises. A few strong lifts is enough to place well — piling on easy exercises won't inflate it much on its own.</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Leaderboards</div>
+                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Tapping an exercise shows how you compare to friends. Friend scores are based on their last 10 synced workout sessions, so their true best may be a little higher than shown.</p>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>All ranks</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
+                    {Array.from({ length: TOTAL_RANKS }, (_, i) => TOTAL_RANKS - 1 - i).map((idx) => {
+                      const info = rankInfo(idx);
+                      return (
+                        <div key={idx} style={{ display: "flex", alignItems: "center", gap: 5, background: info.color + "18", border: `1px solid ${info.color}44`, borderRadius: 6, padding: "4px 6px" }}>
+                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: info.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 10.5, color: info.color, fontWeight: 600, whiteSpace: "nowrap" }}>{info.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modals */}
         {addModalOpen && (
@@ -4278,16 +4680,23 @@ function AppContent({ user }) {
         )}
       </div>
 
-      {/* Floating Add-Quest / Brain-Dump menu */}
-      {fabMenuOpen && (
-        <div style={{ position: "fixed", right: 16, bottom: 148, zIndex: 61, display: "flex", flexDirection: "column", gap: 8 }}>
-          <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><Plus size={15} /> Add Quest</button>
-          <button onClick={() => { setDumpModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><FileText size={14} /> Brain Dump</button>
-        </div>
-      )}
-      <button onClick={() => setFabMenuOpen((v) => !v)} aria-label="Add" className="qlog-btn" style={{ position: "fixed", right: 16, bottom: 76, zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.4)", transform: fabMenuOpen ? "rotate(45deg)" : "none", transition: "transform 0.15s ease" }}>
-        <Plus size={24} color="#1B2430" />
-      </button>
+      {/* Floating Add-Quest / Brain-Dump menu — only on Home/Quests, where "add a quest" is meaningful */}
+      {(activeTab === "home" || activeTab === "quests") && (<>
+        {fabMenuOpen && activeTab === "quests" && (
+          <div style={{ position: "fixed", right: 16, bottom: 148, zIndex: 61, display: "flex", flexDirection: "column", gap: 8 }}>
+            <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><Plus size={15} /> Add Quest</button>
+            <button onClick={() => { setDumpModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><FileText size={14} /> Brain Dump</button>
+          </div>
+        )}
+        <button
+          onClick={() => { if (activeTab === "home") { setActiveTab("quests"); setFabMenuOpen(false); } else { setFabMenuOpen((v) => !v); } }}
+          aria-label="Add"
+          className="qlog-btn"
+          style={{ position: "fixed", right: 16, bottom: 76, zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.4)", transform: fabMenuOpen && activeTab === "quests" ? "rotate(45deg)" : "none", transition: "transform 0.15s ease" }}
+        >
+          <Plus size={24} color="#1B2430" />
+        </button>
+      </>)}
 
       {/* Bottom tab bar */}
       <div className="safe-bottom" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 60, background: themePersonality.cardBase, borderTop: `1px solid ${themePersonality.borderCol}`, display: "flex" }}>
