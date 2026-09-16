@@ -48,14 +48,21 @@ export function normalizeUsername(name) {
   return (name || "").trim().toLowerCase();
 }
 
-export async function isUsernameAvailable(name) {
+// Returns { available, error } rather than a plain boolean so callers can
+// tell "that name is taken" apart from "the check itself failed" (e.g. the
+// usernames collection's Firestore rules aren't published yet) — collapsing
+// both into `false` made every username look taken whenever the read failed.
+export async function checkUsernameAvailable(name) {
   const norm = normalizeUsername(name);
-  if (!norm) return false;
+  if (!norm) return { available: false, error: "Choose a username." };
   try {
     const snap = await getDoc(doc(db, "usernames", norm));
-    return !snap.exists();
+    return { available: !snap.exists(), error: null };
   } catch (e) {
-    return false;
+    const msg = e.code === "permission-denied"
+      ? "Can't check usernames right now — the Firestore rules for the \"usernames\" collection may not be published yet."
+      : "Couldn't check that username — try again.";
+    return { available: false, error: msg };
   }
 }
 
@@ -67,8 +74,9 @@ export async function signUp(email, password, username) {
   const norm = normalizeUsername(username);
   if (!norm) return { user: null, error: "Choose a username." };
   if (!/^[a-z0-9_]{3,20}$/.test(norm)) return { user: null, error: "Usernames must be 3-20 characters: letters, numbers, underscores only." };
-  const available = await isUsernameAvailable(norm);
-  if (!available) return { user: null, error: "That username is already taken." };
+  const check = await checkUsernameAvailable(norm);
+  if (check.error) return { user: null, error: check.error };
+  if (!check.available) return { user: null, error: "That username is already taken." };
 
   let cred;
   try {
@@ -115,8 +123,9 @@ export async function updateUsername(name) {
     catch (e) { return { error: friendlyAuthError(e) }; }
   }
 
-  const available = await isUsernameAvailable(norm);
-  if (!available) return { error: "That username is already taken." };
+  const check = await checkUsernameAvailable(norm);
+  if (check.error) return { error: check.error };
+  if (!check.available) return { error: "That username is already taken." };
 
   try {
     await setDoc(doc(db, "usernames", norm), { uid: auth.currentUser.uid, username: name.trim(), createdAt: serverTimestamp() });

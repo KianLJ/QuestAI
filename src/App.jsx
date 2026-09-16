@@ -770,6 +770,24 @@ function AppContent({ user }) {
     return () => clearTimeout(timer);
   }, [loaded, myUsername, totalXP, streak, lastActiveDate, equipped, workoutPlans, workoutHistory]);
 
+  // ---- Re-sync the username from Firebase on mount ----
+  // The `user` prop can be a snapshot taken by onAuthStateChanged before a
+  // just-completed sign-up's updateProfile(displayName) call has finished —
+  // that event fires as soon as the account exists, not after the profile
+  // update, so `user.displayName` here can still be empty even though a
+  // username really was set moments earlier. reload() pulls the current
+  // value straight from Firebase so the Friends tab's "set a username"
+  // prompt doesn't show for someone who already has one.
+  useEffect(() => {
+    (async () => {
+      try {
+        await auth.currentUser?.reload();
+        const name = auth.currentUser?.displayName;
+        if (name) { setMyUsername(name); setUsernameInput(name); }
+      } catch (e) {}
+    })();
+  }, []);
+
   // ---- Sync notification permission state on load ----
   useEffect(() => {
     if ("Notification" in window) setNotifPermission(Notification.permission);
