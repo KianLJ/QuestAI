@@ -340,6 +340,65 @@ OUTPUT FORMAT (a JSON array, nothing else):
     });
 }
 
+const SPLIT_LABELS = {
+  auto: "whatever split best fits the days per week",
+  full_body: "Full Body every session",
+  upper_lower: "an Upper/Lower split",
+  ppl: "a Push/Pull/Legs split",
+  bro: "a Bro split (one muscle group focus per day)",
+};
+
+async function generateWorkoutPlan({ daysPerWeek, splitType, experience, goal }, availableExercises) {
+  const exerciseList = availableExercises.map((e) => ({ id: e.id, name: e.name, muscle: e.primaryMuscle, equipment: e.equipment }));
+
+  const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON object, nothing else — no prose, no explanation, no markdown, no backticks, no commentary before or after.
+
+Design a ${daysPerWeek}-day-per-week workout program for a ${experience} lifter. Goal: ${goal}. Split style: ${SPLIT_LABELS[splitType] || SPLIT_LABELS.auto}.
+
+ONLY use exercises from this list, referenced by their exact "id" field. Never invent an id that isn't in this list — pick the closest real match instead.
+${JSON.stringify(exerciseList)}
+
+Rules:
+- Create between 1 and ${daysPerWeek} distinct workout plans. A plan may repeat across multiple training days if the split calls for it (e.g. alternating Upper/Lower).
+- Each plan needs 4-7 exercises with sensible muscle-group balance for its focus.
+- sets: 3-5. targetReps: a short range string like "8-12". restSeconds: 45-120, lower for isolation work, higher for big compound lifts.
+- Assign exactly ${daysPerWeek} weekdays (keys from: mon,tue,wed,thu,fri,sat,sun) to plans in "schedule", spreading them out with rest days between when it makes sense for recovery. Omit rest days from "schedule" entirely — only include training days.
+
+OUTPUT FORMAT (nothing else):
+{"plans":[{"name":"Push Day","exercises":[{"exerciseId":"bb-bench-press","sets":4,"targetReps":"8-10","restSeconds":90}]}],"schedule":{"mon":"Push Day","thu":"Push Day"}}`, 45000, 3000);
+
+  const parsed = JSON.parse(clean);
+  if (!parsed || !Array.isArray(parsed.plans)) throw new Error("bad response");
+
+  const validIds = new Set(availableExercises.map((e) => e.id));
+  const plans = parsed.plans
+    .filter((p) => p && p.name && Array.isArray(p.exercises))
+    .map((p) => ({
+      name: String(p.name).slice(0, 40),
+      exercises: p.exercises
+        .filter((ex) => ex && validIds.has(ex.exerciseId))
+        .slice(0, 10)
+        .map((ex) => ({
+          exerciseId: ex.exerciseId,
+          sets: Math.min(8, Math.max(1, Math.round(Number(ex.sets) || 3))),
+          targetReps: ex.targetReps ? String(ex.targetReps).slice(0, 12) : "8-12",
+          restSeconds: Math.min(300, Math.max(15, Math.round(Number(ex.restSeconds) || 60))),
+        })),
+    }))
+    .filter((p) => p.exercises.length > 0)
+    .slice(0, 7);
+  if (plans.length === 0) throw new Error("no valid plans");
+
+  const planNames = new Set(plans.map((p) => p.name));
+  const dayKeys = new Set(DAYS.map((d) => d.key));
+  const schedule = {};
+  if (parsed.schedule && typeof parsed.schedule === "object") {
+    for (const [day, planName] of Object.entries(parsed.schedule)) {
+      if (dayKeys.has(day) && planNames.has(planName)) schedule[day] = planName;
+    }
+  }
+  return { plans, schedule };
+}
 
 async function splitEpicTask(taskTitle) {
   const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON array. No prose, no explanation, no markdown, no backticks. Just the raw JSON array starting with [ and ending with ]. Any text outside the array will break the parser.
@@ -518,6 +577,14 @@ function AppContent({ user }) {
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
   const [sessionOverlayOpen, setSessionOverlayOpen] = useState(false);
   const [, setWorkoutClockTick] = useState(0);
+  const [aiEquipment, setAiEquipment] = useState([...EQUIPMENT_TYPES]);
+  const [aiDaysPerWeek, setAiDaysPerWeek] = useState(3);
+  const [aiSplitType, setAiSplitType] = useState("auto");
+  const [aiExperience, setAiExperience] = useState("beginner");
+  const [aiGoal, setAiGoal] = useState("general");
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiError, setAiError] = useState(null);
+  const [aiPreview, setAiPreview] = useState(null); // { plans, schedule } once generated, before the user applies it
 
   // Calendar state
   const [calView, setCalView] = useState("week"); // "day" | "week" | "month"
@@ -1410,6 +1477,43 @@ function AppContent({ user }) {
   }
   function discardWorkout() { setWorkoutSession(null); setSessionOverlayOpen(false); }
   function deleteWorkoutHistoryEntry(id) { setWorkoutHistory((h) => h.filter((e) => e.id !== id)); }
+
+  async function handleGenerateWorkout() {
+    if (aiGenerating) return;
+    setAiGenerating(true);
+    setAiError(null);
+    setAiPreview(null);
+    const availableExercises = [...EXERCISE_CATALOGUE, ...customExercises].filter((e) => aiEquipment.includes(e.equipment));
+    if (availableExercises.length === 0) {
+      setAiGenerating(false);
+      setAiError("Select at least one equipment type you have access to.");
+      return;
+    }
+    generateWorkoutPlan({ daysPerWeek: aiDaysPerWeek, splitType: aiSplitType, experience: aiExperience, goal: aiGoal }, availableExercises)
+      .then((result) => setAiPreview(result))
+      .catch(() => setAiError("Couldn't generate a plan right now. Try again in a moment."))
+      .finally(() => setAiGenerating(false));
+  }
+
+  function applyGeneratedWorkout() {
+    if (!aiPreview) return;
+    const nameToId = {};
+    const newPlans = aiPreview.plans.map((p) => {
+      const id = Date.now() + Math.random();
+      nameToId[p.name] = id;
+      return { id, name: p.name, exercises: p.exercises.map((ex) => ({ id: Date.now() + Math.random(), ...ex })) };
+    });
+    setWorkoutPlans((ps) => [...ps, ...newPlans]);
+    setWorkoutSchedule((s) => {
+      const next = { ...s };
+      for (const [day, planName] of Object.entries(aiPreview.schedule)) {
+        if (nameToId[planName] != null) next[day] = nameToId[planName];
+      }
+      return next;
+    });
+    setAiPreview(null);
+    setActiveWorkoutTab("today");
+  }
 
   async function handleSaveUsername() {
     const trimmed = usernameInput.trim();
@@ -3032,6 +3136,7 @@ function AppContent({ user }) {
                 { key: "plans", label: "Plans" },
                 { key: "schedule", label: "Schedule" },
                 { key: "history", label: "History" },
+                { key: "generate", label: "✨ Generate" },
               ].map((t) => (
                 <button key={t.key} onClick={() => { setActiveWorkoutTab(t.key); setHistoryExerciseId(null); }} className="qlog-btn" style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 20, border: `1px solid ${activeWorkoutTab === t.key ? accent : "#33414F"}`, background: activeWorkoutTab === t.key ? accent : "#232E3D", color: activeWorkoutTab === t.key ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{t.label}</button>
               ))}
@@ -3228,6 +3333,119 @@ function AppContent({ user }) {
                   </div>
                 </div>
               )
+            )}
+
+            {activeWorkoutTab === "generate" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {!aiPreview && (
+                  <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipment you have</div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {EQUIPMENT_TYPES.map((eq) => {
+                          const on = aiEquipment.includes(eq);
+                          return (
+                            <button key={eq} onClick={() => setAiEquipment((cur) => on ? cur.filter((e) => e !== eq) : [...cur, eq])} className="qlog-btn"
+                              style={{ fontSize: 11, background: on ? accent : "#141C27", border: `1px solid ${on ? accent : "#33414F"}`, borderRadius: 16, padding: "5px 10px", color: on ? "#1B2430" : "#8A8578", cursor: "pointer", fontWeight: on ? 700 : 400 }}>
+                              {EQUIPMENT_LABELS[eq] || eq}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Days per week</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {[2, 3, 4, 5, 6].map((n) => (
+                          <button key={n} onClick={() => setAiDaysPerWeek(n)} className="qlog-btn"
+                            style={{ flex: 1, fontSize: 12, fontWeight: 700, background: aiDaysPerWeek === n ? accent : "#141C27", border: `1px solid ${aiDaysPerWeek === n ? accent : "#33414F"}`, borderRadius: 8, padding: "8px 0", color: aiDaysPerWeek === n ? "#1B2430" : "#8A8578", cursor: "pointer" }}>
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Split</div>
+                        <select value={aiSplitType} onChange={(e) => setAiSplitType(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: 12 }}>
+                          <option value="auto">Auto</option>
+                          <option value="full_body">Full Body</option>
+                          <option value="upper_lower">Upper/Lower</option>
+                          <option value="ppl">Push/Pull/Legs</option>
+                          <option value="bro">Bro split</option>
+                        </select>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Experience</div>
+                        <select value={aiExperience} onChange={(e) => setAiExperience(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: 12 }}>
+                          <option value="beginner">Beginner</option>
+                          <option value="intermediate">Intermediate</option>
+                          <option value="advanced">Advanced</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Goal</div>
+                      <select value={aiGoal} onChange={(e) => setAiGoal(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: 12 }}>
+                        <option value="general">General fitness</option>
+                        <option value="strength">Strength</option>
+                        <option value="hypertrophy">Muscle growth</option>
+                        <option value="fat_loss">Fat loss</option>
+                        <option value="endurance">Endurance</option>
+                      </select>
+                    </div>
+
+                    {aiError && <p style={{ fontSize: 12, color: "#C1652B", margin: 0 }}>{aiError}</p>}
+
+                    <button onClick={handleGenerateWorkout} disabled={aiGenerating} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: aiGenerating ? "default" : "pointer", opacity: aiGenerating ? 0.6 : 1 }}>
+                      {aiGenerating ? "Generating..." : "✨ Generate Plan"}
+                    </button>
+                  </div>
+                )}
+
+                {aiPreview && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {aiPreview.plans.map((p, i) => (
+                        <div key={i} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{p.name}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            {p.exercises.map((ex, j) => {
+                              const exInfo = findExercise(ex.exerciseId, customExercises);
+                              return (
+                                <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578" }}>
+                                  <span>{exInfo?.name || ex.exerciseId}</span>
+                                  <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "#EDE4D3" }}>{ex.sets} × {ex.targetReps}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Weekly Schedule</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {DAYS.map((d) => (
+                          <div key={d.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                            <span style={{ color: "#8A8578" }}>{d.label}</span>
+                            <span style={{ color: aiPreview.schedule[d.key] ? accent : "#5C6773" }}>{aiPreview.schedule[d.key] || "Rest"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => setAiPreview(null)} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 12, color: "#8A8578", cursor: "pointer" }}>Discard</button>
+                      <button onClick={applyGeneratedWorkout} className="qlog-btn" style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}>Apply Plan</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
