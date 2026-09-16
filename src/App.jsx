@@ -161,6 +161,24 @@ function habitTier(streakDays) {
   if (streakDays >= 3) return { label: "Bronze", color: "#C1652B" };
   return { label: null, color: "#5C6773" };
 }
+const HABIT_TIER_DAYS = [3, 7, 21, 66];
+function nextHabitMilestone(streakDays) {
+  return HABIT_TIER_DAYS.find((d) => d > streakDays) || null;
+}
+// Last 7 days as filled/empty dots, inferred from the current streak (which
+// is always contiguous by construction) rather than a stored history log.
+function habitStreakDots(habit, today) {
+  const rangeEnd = habit.lastCompletedDate === today ? today
+    : habit.lastCompletedDate === addDaysLocal(today, -1) ? addDaysLocal(today, -1)
+    : null;
+  const rangeStart = rangeEnd && habit.streak > 0 ? addDaysLocal(rangeEnd, -(habit.streak - 1)) : null;
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = addDaysLocal(today, -i);
+    days.push({ date: d, filled: !!(rangeStart && d >= rangeStart && d <= rangeEnd), isToday: d === today });
+  }
+  return days;
+}
 function pad2(n) { return String(n).padStart(2, "0"); }
 function localDateStr(d = new Date()) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
 function parseLocalDate(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
@@ -508,6 +526,9 @@ function AppContent({ user }) {
 
   // UI state
   const [showCompleted, setShowCompleted] = useState(true);
+  const [questFilterOpen, setQuestFilterOpen] = useState(false);
+  const [questSearch, setQuestSearch] = useState("");
+  const [questDifficultyFilter, setQuestDifficultyFilter] = useState([]); // empty = all difficulties
   const [levelUp, setLevelUp] = useState(null);
   const [playerStats, setPlayerStats] = useState({ bonusHp: 0, bonusDef: 0, bonusAtk: 0, bonusCrit: 0 });
   const [statHistory, setStatHistory] = useState([]);
@@ -999,8 +1020,13 @@ function AppContent({ user }) {
     });
   }
 
+  function matchesQuestFilter(q) {
+    if (questDifficultyFilter.length > 0 && !questDifficultyFilter.includes(q.difficulty)) return false;
+    if (questSearch.trim() && !q.title.toLowerCase().includes(questSearch.trim().toLowerCase())) return false;
+    return true;
+  }
   function questsForDate(date) {
-    return quests.filter((q) => q.date === date && (showCompleted || !q.completed));
+    return quests.filter((q) => q.date === date && (showCompleted || !q.completed) && matchesQuestFilter(q));
   }
 
   // ---- Quest actions ----
@@ -1214,7 +1240,7 @@ function AppContent({ user }) {
     const yesterday = yesterdayStr();
     const newStreak = habit.lastCompletedDate === yesterday ? habit.streak + 1 : 1;
     const milestoneBonus = HABIT_STREAK_MILESTONES[newStreak] || 0;
-    const steppedHabits = habits.map((h) => h.id === id ? { ...h, streak: newStreak, lastCompletedDate: today, totalCompletions: h.totalCompletions + 1 } : h);
+    const steppedHabits = habits.map((h) => h.id === id ? { ...h, streak: newStreak, lastCompletedDate: today, totalCompletions: h.totalCompletions + 1, completionLog: [...(h.completionLog || []), today].slice(-120) } : h);
     const allDoneToday = steppedHabits.length > 0 && steppedHabits.every((h) => h.lastCompletedDate === today);
     const perfectDayEarned = allDoneToday && habitPerfectDayDate !== today;
     let mainStreakChanged = false, newMainStreak = streak;
@@ -1244,12 +1270,12 @@ function AppContent({ user }) {
     setGold((g) => Math.max(0, g - (u.goldAwarded || 0)));
     if (u.mainStreakChanged) { setStreak(u.prevMainStreak); setLastActiveDate(u.prevMainLastActiveDate); }
     if (u.perfectDayEarned) setHabitPerfectDayDate((d) => d === today ? null : d);
-    setHabits((hs) => hs.map((h) => h.id === id ? { ...h, streak: u.prevStreak, lastCompletedDate: u.prevLastCompletedDate, totalCompletions: Math.max(0, h.totalCompletions - 1), undo: null } : h));
+    setHabits((hs) => hs.map((h) => h.id === id ? { ...h, streak: u.prevStreak, lastCompletedDate: u.prevLastCompletedDate, totalCompletions: Math.max(0, h.totalCompletions - 1), undo: null, completionLog: (h.completionLog || []).filter((d) => d !== today) } : h));
   }
   function addHabit(name, deadlineTime = "") {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setHabits((hs) => [...hs, { id: Date.now() + Math.random(), name: trimmed, streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: deadlineTime || null }]);
+    setHabits((hs) => [...hs, { id: Date.now() + Math.random(), name: trimmed, streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: deadlineTime || null, completionLog: [] }]);
     setNewHabitName("");
     setNewHabitDeadline("");
   }
@@ -2643,13 +2669,36 @@ function AppContent({ user }) {
           </div>
         </div>
 
-        {/* Show completed toggle */}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+        {/* Filter toggle + show completed */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <button onClick={() => setQuestFilterOpen((v) => !v)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 6, border: `1px solid ${questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent : "#33414F"}`, background: questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent + "18" : "#232E3D", color: questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent : "#8A8578", cursor: "pointer" }}>
+            Filter{questDifficultyFilter.length > 0 && ` (${questDifficultyFilter.length})`}
+          </button>
           <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8A8578", cursor: "pointer" }}>
             <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
             Show completed
           </label>
         </div>
+
+        {questFilterOpen && (
+          <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+            <input value={questSearch} onChange={(e) => setQuestSearch(e.target.value)} placeholder="Search quest titles..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {themedDifficulties.map((d) => {
+                const active = questDifficultyFilter.includes(d.key);
+                return (
+                  <button key={d.key} onClick={() => setQuestDifficultyFilter((f) => active ? f.filter((k) => k !== d.key) : [...f, d.key])} className="qlog-btn"
+                    style={{ fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 14, border: `1.5px solid ${d.color}`, background: active ? d.color : "transparent", color: active ? "#1B2430" : d.color, cursor: "pointer" }}>
+                    {d.label}
+                  </button>
+                );
+              })}
+              {(questSearch || questDifficultyFilter.length > 0) && (
+                <button onClick={() => { setQuestSearch(""); setQuestDifficultyFilter([]); }} className="qlog-btn" style={{ fontSize: 10, padding: "4px 9px", borderRadius: 14, border: "1px solid #33414F", background: "none", color: "#8A8578", cursor: "pointer" }}>Clear</button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ---- Calendar views ---- */}
         {calView === "day" && (
@@ -2746,7 +2795,7 @@ function AppContent({ user }) {
                   const d = parseLocalDate(date);
                   const isThisMonth = d.getMonth() === anchorMonth;
                   const isToday = date === today;
-                  const dayQuests = quests.filter((q) => q.date === date && (showCompleted || !q.completed));
+                  const dayQuests = quests.filter((q) => q.date === date && (showCompleted || !q.completed) && matchesQuestFilter(q));
                   const active = dayQuests.filter((q) => !q.completed).length;
                   const done = dayQuests.filter((q) => q.completed).length;
                   const hasOverdue = date < today && active > 0;
@@ -2771,11 +2820,16 @@ function AppContent({ user }) {
                       {done > 0 && <div style={{ fontSize: 9, color: "#4C9A6A", lineHeight: 1.4 }}>✓ {done}</div>}
                       {active > 0 && (
                         <div style={{ display: "flex", gap: 2, marginTop: 2, flexWrap: "wrap" }}>
-                          {quests.filter((q) => q.date === date && !q.completed).slice(0, 4).map((q) => {
+                          {dayQuests.filter((q) => !q.completed).slice(0, 4).map((q) => {
                             const d = themedDifficulties.find((df) => df.key === q.difficulty);
                             return <div key={q.id} style={{ width: 5, height: 5, borderRadius: "50%", background: d?.color || accent }} />;
                           })}
                           {active > 4 && <div style={{ fontSize: 8, color: "#5C6773" }}>+{active - 4}</div>}
+                        </div>
+                      )}
+                      {dayQuests.length > 0 && (
+                        <div title={`${done}/${dayQuests.length} completed`} style={{ height: 3, borderRadius: 2, marginTop: 3, background: "#141C27", overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${(done / dayQuests.length) * 100}%`, background: "#4C9A6A", borderRadius: 2 }} />
                         </div>
                       )}
                     </div>
@@ -2803,8 +2857,28 @@ function AppContent({ user }) {
         )}
 
         {/* Daily Habits */}
-        {activeTab === "habits" && (
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 20 }}>
+        {activeTab === "habits" && (() => {
+          const doneCount = habits.filter((h) => h.lastCompletedDate === today).length;
+          const allDoneToday = habits.length > 0 && doneCount === habits.length;
+          const perfectDayEarnedToday = habitPerfectDayDate === today;
+          const bestHabit = habits.reduce((best, h) => (h.streak > (best?.streak || 0) ? h : best), null);
+          const totalCompletions = habits.reduce((sum, h) => sum + (h.totalCompletions || 0), 0);
+          const last30Days = Array.from({ length: 30 }, (_, i) => {
+            const d = addDaysLocal(today, -(29 - i));
+            const done = habits.filter((h) => (h.completionLog || []).includes(d)).length;
+            return { date: d, done, ratio: habits.length ? done / habits.length : 0 };
+          });
+          const tiers = [
+            { label: "Bronze", days: 3, color: "#C1652B" },
+            { label: "Silver", days: 7, color: "#B8C4CE" },
+            { label: "Gold", days: 21, color: "#C9A227" },
+            { label: "Diamond", days: 66, color: "#4FA3C9" },
+          ];
+          return (
+          <div style={{ marginBottom: 20 }}>
+
+          {/* Daily Habits */}
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>Daily Habits</span>
               <span style={{ fontSize: 9, color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
@@ -2815,30 +2889,38 @@ function AppContent({ user }) {
                 const doneToday = h.lastCompletedDate === today;
                 const tier = habitTier(h.streak);
                 const isLate = !!h.deadlineTime && !doneToday && nowHHMM() > h.deadlineTime;
+                const dots = habitStreakDots(h, today);
                 return (
-                  <div key={h.id} style={{ position: "relative", display: "flex", alignItems: "center", gap: 6, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: "4px 8px" }}>
-                    {!doneToday
-                      ? <button onClick={() => completeHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
-                      : <button onClick={() => uncompleteHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
-                    }
-                    <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
-                    {isLate && <span style={{ fontSize: 9, fontWeight: 700, color: "#D9536A" }}>LATE</span>}
-                    <label title={h.deadlineTime ? `Due by ${formatDeadline(h.deadlineTime)}` : "Set a due time"} style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }}>
-                      <Timer size={10} color={isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563"} />
-                      <input
-                        type="time"
-                        value={h.deadlineTime || ""}
-                        onChange={(e) => setHabitDeadline(h.id, e.target.value)}
-                        style={{ width: 62, background: "transparent", border: "none", color: isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563", fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", colorScheme: "dark" }}
-                      />
-                    </label>
-                    {h.streak > 0 && (
-                      <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
-                        <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
-                      </span>
-                    )}
-                    <button onClick={() => deleteHabit(h.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={11} /></button>
-                    {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 30, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
+                  <div key={h.id} style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: "4px 8px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {!doneToday
+                        ? <button onClick={() => completeHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
+                        : <button onClick={() => uncompleteHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
+                      }
+                      <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
+                      {isLate && <span style={{ fontSize: 9, fontWeight: 700, color: "#D9536A" }}>LATE</span>}
+                      <label title={h.deadlineTime ? `Due by ${formatDeadline(h.deadlineTime)}` : "Set a due time"} style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }}>
+                        <Timer size={10} color={isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563"} />
+                        <input
+                          type="time"
+                          value={h.deadlineTime || ""}
+                          onChange={(e) => setHabitDeadline(h.id, e.target.value)}
+                          style={{ width: 62, background: "transparent", border: "none", color: isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563", fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", colorScheme: "dark" }}
+                        />
+                      </label>
+                      {h.streak > 0 && (
+                        <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
+                          <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
+                        </span>
+                      )}
+                      <button onClick={() => deleteHabit(h.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={11} /></button>
+                      {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 30, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
+                    </div>
+                    <div style={{ display: "flex", gap: 3, paddingLeft: 21 }}>
+                      {dots.map((d) => (
+                        <div key={d.date} title={d.date} style={{ width: 12, height: 12, borderRadius: 3, background: d.filled ? tier.color || accent : "transparent", border: `1.5px solid ${d.filled ? (tier.color || accent) : d.isToday ? "#5C6773" : "#2C3947"}` }} />
+                      ))}
+                    </div>
                   </div>
                 );
               })}
@@ -2849,7 +2931,97 @@ function AppContent({ user }) {
               <button onClick={() => addHabit(newHabitName, newHabitDeadline)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 8px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={13} color="#1B2430" /></button>
             </div>
           </div>
-        )}
+
+          {/* Today's progress */}
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Today's Progress</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{doneCount}/{habits.length}</span>
+            </div>
+            <div style={{ height: 7, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
+              <div style={{ height: "100%", width: `${habits.length ? (doneCount / habits.length) * 100 : 0}%`, background: allDoneToday ? "#4C9A6A" : accent, borderRadius: 4, transition: "width 0.3s ease" }} />
+            </div>
+            {perfectDayEarnedToday ? (
+              <p style={{ fontSize: 11, color: "#4C9A6A", margin: 0 }}>✓ Perfect day complete — +{PERFECT_DAY_XP} bonus XP earned!</p>
+            ) : habits.length > 0 ? (
+              <p style={{ fontSize: 11, color: "#8A8578", margin: 0 }}>Complete all {habits.length} for a +{PERFECT_DAY_XP} XP perfect-day bonus.</p>
+            ) : null}
+          </div>
+
+          {/* 30-day consistency heatmap */}
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Last 30 Days</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <span style={{ fontSize: 8, color: "#5C6773" }}>Less</span>
+                {[0.001, 0.34, 0.67, 1].map((r) => (
+                  <div key={r} style={{ width: 6, height: 6, borderRadius: 2, background: r === 0.001 ? "#141C27" : accent, opacity: r === 0.001 ? 1 : Math.max(0.25, r) }} />
+                ))}
+                <span style={{ fontSize: 8, color: "#5C6773" }}>More</span>
+              </div>
+            </div>
+            {habits.length === 0 ? (
+              <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Add a habit to start tracking consistency.</p>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                {last30Days.map((d) => (
+                  <div key={d.date} title={`${d.date}: ${d.done}/${habits.length} habits`} style={{ width: 10, height: 10, borderRadius: 2, background: d.ratio > 0 ? accent : "#141C27", opacity: d.ratio > 0 ? Math.max(0.3, d.ratio) : 1, border: d.date === today ? `1px solid ${accent}` : "1px solid transparent" }} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Streak stats + tier legend */}
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Streaks</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: bestHabit?.streak > 0 ? "#C1652B" : "#5C6773", fontFamily: "ui-monospace, Menlo, monospace" }}>{bestHabit?.streak > 0 ? `${bestHabit.streak}d` : "—"}</div>
+                <div style={{ fontSize: 10, color: "#5C6773" }}>{bestHabit?.streak > 0 ? `Best: ${bestHabit.name}` : "No active streaks"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{totalCompletions}</div>
+                <div style={{ fontSize: 10, color: "#5C6773" }}>Total completions</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {tiers.map((t) => (
+                <span key={t.label} style={{ fontSize: 9, fontWeight: 700, color: t.color, background: t.color + "18", border: `1px solid ${t.color}44`, borderRadius: 12, padding: "3px 8px" }}>{t.label} · {t.days}d+</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Next milestones */}
+          {habits.some((h) => h.streak > 0 && nextHabitMilestone(h.streak)) && (
+            <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Next Milestones</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {habits
+                  .filter((h) => h.streak > 0 && nextHabitMilestone(h.streak))
+                  .map((h) => ({ h, next: nextHabitMilestone(h.streak) }))
+                  .sort((a, b) => (a.next - a.h.streak) - (b.next - b.h.streak))
+                  .map(({ h, next }) => {
+                    const tier = habitTier(next);
+                    const prevThreshold = [0, ...HABIT_TIER_DAYS].reverse().find((d) => d < next) || 0;
+                    const pct = ((h.streak - prevThreshold) / (next - prevThreshold)) * 100;
+                    return (
+                      <div key={h.id}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                          <span style={{ color: "#EDE4D3" }}>{h.name}</span>
+                          <span style={{ color: tier.color, fontWeight: 700 }}>{next - h.streak}d to {tier.label}</span>
+                        </div>
+                        <div style={{ height: 5, background: "#141C27", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${pct}%`, background: tier.color, borderRadius: 3 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+          </div>
+          );
+        })()}
 
         {/* Workout */}
         {activeTab === "workout" && (
