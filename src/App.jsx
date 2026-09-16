@@ -217,16 +217,15 @@ function fmtTime(sec) { return `${Math.floor(sec / 60).toString().padStart(2, "0
 function xpFor(diffKey) { return DIFFICULTIES.find((d) => d.key === diffKey)?.xp || 10; }
 function extractJson(text) {
   const cleaned = text.replace(/```json|```/g, "").trim();
-  // Try clean array first
-  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
-  if (arrayMatch) {
-    try { JSON.parse(arrayMatch[0]); return arrayMatch[0]; } catch (_) {}
-  }
-  // Try clean object
-  const objMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (objMatch) {
-    try { JSON.parse(objMatch[0]); return objMatch[0]; } catch (_) {}
-  }
+  // If the response is a top-level object, prefer matching that whole — otherwise a naive
+  // array regex would grab a nested array (e.g. {"plans":[...],"schedule":{...}}) instead.
+  const preferObject = cleaned.startsWith("{");
+  const tryArray = () => { const m = cleaned.match(/\[[\s\S]*\]/); if (m) { try { JSON.parse(m[0]); return m[0]; } catch (_) {} } return null; };
+  const tryObject = () => { const m = cleaned.match(/\{[\s\S]*\}/); if (m) { try { JSON.parse(m[0]); return m[0]; } catch (_) {} } return null; };
+  const first = preferObject ? tryObject() : tryArray();
+  if (first) return first;
+  const second = preferObject ? tryArray() : tryObject();
+  if (second) return second;
   // Truncated array — extract complete items only
   if (cleaned.includes("[")) {
     const start = cleaned.indexOf("[");
