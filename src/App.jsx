@@ -3130,16 +3130,23 @@ function AppContent({ user }) {
         {/* Workout */}
         {activeTab === "workout" && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, marginBottom: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: 4 }}>
               {[
-                { key: "today", label: "Today" },
-                { key: "plans", label: "Plans" },
-                { key: "schedule", label: "Schedule" },
-                { key: "history", label: "History" },
-                { key: "generate", label: "✨ Generate" },
-              ].map((t) => (
-                <button key={t.key} onClick={() => { setActiveWorkoutTab(t.key); setHistoryExerciseId(null); }} className="qlog-btn" style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 20, border: `1px solid ${activeWorkoutTab === t.key ? accent : "#33414F"}`, background: activeWorkoutTab === t.key ? accent : "#232E3D", color: activeWorkoutTab === t.key ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{t.label}</button>
-              ))}
+                { key: "today", label: "Today", Icon: Target },
+                { key: "plans", label: "Plans", Icon: FileText },
+                { key: "schedule", label: "Schedule", Icon: IconCalendar },
+                { key: "history", label: "History", Icon: Timer },
+                { key: "generate", label: "Generate", Icon: Wand2 },
+              ].map((t) => {
+                const on = activeWorkoutTab === t.key;
+                return (
+                  <button key={t.key} onClick={() => { setActiveWorkoutTab(t.key); setHistoryExerciseId(null); }} className="qlog-btn"
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, fontSize: 10, fontWeight: 700, padding: "8px 2px", borderRadius: 8, border: "none", background: on ? accent : "transparent", color: on ? "#1B2430" : "#8A8578", cursor: "pointer", transition: "background 0.15s, color 0.15s" }}>
+                    <t.Icon size={15} />
+                    {t.label}
+                  </button>
+                );
+              })}
             </div>
 
             {activeWorkoutTab === "today" && (() => {
