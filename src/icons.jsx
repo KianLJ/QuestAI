@@ -82,6 +82,12 @@ function IconHome({ size = 16, color = "currentColor", style }) {
 function IconCalendar({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}><rect x="3.5" y="5" width="17" height="16" rx="2" /><line x1="3.5" y1="10" x2="20.5" y2="10" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="16" y1="3" x2="16" y2="7" /></svg>;
 }
+function IconUser({ size = 16, color = "currentColor", style }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7" /></svg>;
+}
+function IconUsers({ size = 16, color = "currentColor", style }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}><circle cx="9" cy="8" r="3.2" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><path d="M16 5.2a3.2 3.2 0 0 1 0 6.2" /><path d="M15 14.2c2.6.5 4.5 2.6 4.5 5.8" /></svg>;
+}
 function IconDumbbell({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={style}><path d="M4 9v6" /><path d="M2 10v4" /><rect x="4.5" y="8" width="3" height="8" rx="1" /><line x1="7.5" y1="12" x2="16.5" y2="12" /><rect x="16.5" y="8" width="3" height="8" rx="1" /><path d="M20 10v4" /><path d="M22 9v6" /></svg>;
 }
@@ -120,4 +126,4 @@ function IconPalette({ size = 16, color = "currentColor" }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10a2 2 0 0 0 2-2 2 2 0 0 0-.5-1.3c-.4-.5-.4-1.2 0-1.7A2 2 0 0 1 15 16h2a5 5 0 0 0 5-5c0-4.4-4-8-10-8z" /><circle cx="8.5" cy="9.5" r="1.2" fill={color} stroke="none" /><circle cx="15.5" cy="9.5" r="1.2" fill={color} stroke="none" /><circle cx="8.5" cy="14.5" r="1.2" fill={color} stroke="none" /></svg>;
 }
 
-export { Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3, Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2, Timer, Loader2, Edit2, IconHome, IconCalendar, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown, IconTitle, IconPalette };
+export { Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3, Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2, Timer, Loader2, Edit2, IconHome, IconCalendar, IconUser, IconUsers, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown, IconTitle, IconPalette };

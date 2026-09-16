@@ -4,6 +4,7 @@ import { signUp, logIn, resetPassword } from "./firebase";
 export default function AuthScreen() {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [info, setInfo] = useState(null);
@@ -16,8 +17,9 @@ export default function AuthScreen() {
     setInfo(null);
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !password) { setError("Enter an email and password."); return; }
+    if (mode === "signup" && !username.trim()) { setError("Choose a username."); return; }
     setBusy(true);
-    const result = mode === "signup" ? await signUp(trimmedEmail, password) : await logIn(trimmedEmail, password);
+    const result = mode === "signup" ? await signUp(trimmedEmail, password, username) : await logIn(trimmedEmail, password);
     setBusy(false);
     if (result.error) setError(result.error);
   }
@@ -48,6 +50,11 @@ export default function AuthScreen() {
         <form onSubmit={submit}>
           <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Email</label>
           <input type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" style={{ width: "100%", marginBottom: 14, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
+
+          {mode === "signup" && (<>
+            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Username</label>
+            <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="letters, numbers, underscores" style={{ width: "100%", marginBottom: 14, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
+          </>)}
 
           <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Password</label>
           <input type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={mode === "signup" ? "At least 6 characters" : "••••••••"} style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />

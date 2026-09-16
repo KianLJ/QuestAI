@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3,
   Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2,
-  Timer, Loader2, Edit2, IconHome, IconCalendar, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
+  Timer, Loader2, Edit2, IconHome, IconCalendar, IconUser, IconUsers, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
   IconTitle, IconPalette,
 } from "./icons";
 import {
@@ -12,7 +12,10 @@ import {
 import {
   MUSCLE_GROUPS, MUSCLE_LABELS, EQUIPMENT_TYPES, EQUIPMENT_LABELS, EXERCISE_CATALOGUE, findExercise, summarizeMuscleVolume,
 } from "./exerciseCatalogue";
-import { auth, onAuthChange, logOut } from "./firebase";
+import {
+  auth, onAuthChange, logOut, updateUsername, changePassword,
+  saveProfile, getProfile, sendFriendRequest, listFriendRequests, declineFriendRequest, cancelFriendRequest, acceptFriendRequest, removeFriend,
+} from "./firebase";
 import AuthScreen from "./AuthScreen";
 
 const DIFFICULTIES = [
@@ -406,6 +409,19 @@ function WeekShiftModal({ weekDates, shifts, accent, themePersonality, onSave, o
   );
 }
 
+function SettingsSection({ title, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ border: "1px solid #33414F", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="qlog-btn" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "none", padding: "12px 14px", cursor: "pointer" }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", letterSpacing: 0.5 }}>{title}</span>
+        <ChevronRight size={14} color="#8A8578" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s ease" }} />
+      </button>
+      {open && <div style={{ padding: 14 }}>{children}</div>}
+    </div>
+  );
+}
+
 function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete }) {
   const [weight, setWeight] = useState(set.weight || "");
   const [reps, setReps] = useState(set.reps || "");
@@ -524,6 +540,26 @@ function AppContent({ user }) {
   const [splitError, setSplitError] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [usernameInput, setUsernameInput] = useState(user?.displayName || "");
+  const [usernameMsg, setUsernameMsg] = useState(null);
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [myUsername, setMyUsername] = useState(user?.displayName || "");
+
+  // Friends
+  const [activeFriendsTab, setActiveFriendsTab] = useState("friends"); // "friends" | "requests" | "add"
+  const [friendIds, setFriendIds] = useState([]);
+  const [friendsData, setFriendsData] = useState({}); // uid -> profile
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendRequests, setFriendRequests] = useState({ incoming: [], outgoing: [] });
+  const [friendSearchInput, setFriendSearchInput] = useState("");
+  const [friendSearchMsg, setFriendSearchMsg] = useState(null);
+  const [friendSearchBusy, setFriendSearchBusy] = useState(false);
+  const [selectedFriendUid, setSelectedFriendUid] = useState(null);
+  const [friendsRefreshTick, setFriendsRefreshTick] = useState(0);
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [passwordMsg, setPasswordMsg] = useState(null);
+  const [passwordBusy, setPasswordBusy] = useState(false);
   const [moveMenuFor, setMoveMenuFor] = useState(null);
   const [questDetailFor, setQuestDetailFor] = useState(null);
   const [deleteSeriesPromptFor, setDeleteSeriesPromptFor] = useState(null); // { id, seriesId, title }
@@ -718,6 +754,22 @@ function AppContent({ user }) {
     const id = setInterval(() => setWorkoutClockTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [workoutSession?.startedAt]);
+  // ---- Mirror the shareable subset of data to profiles/{uid} for friends ----
+  useEffect(() => {
+    if (!loaded || !myUsername) return;
+    const timer = setTimeout(() => {
+      saveProfile({
+        username: myUsername,
+        level: levelFromXP(totalXP).level,
+        totalXP, streak, lastActiveDate,
+        equipped, workoutPlans,
+        workoutHistory: workoutHistory.slice(0, 10),
+        updatedAt: Date.now(),
+      });
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [loaded, myUsername, totalXP, streak, lastActiveDate, equipped, workoutPlans, workoutHistory]);
+
   // ---- Sync notification permission state on load ----
   useEffect(() => {
     if ("Notification" in window) setNotifPermission(Notification.permission);
@@ -1314,6 +1366,88 @@ function AppContent({ user }) {
   }
   function discardWorkout() { setWorkoutSession(null); setSessionOverlayOpen(false); }
   function deleteWorkoutHistoryEntry(id) { setWorkoutHistory((h) => h.filter((e) => e.id !== id)); }
+
+  async function handleSaveUsername() {
+    const trimmed = usernameInput.trim();
+    if (!trimmed || usernameBusy) return;
+    setUsernameBusy(true);
+    setUsernameMsg(null);
+    const result = await updateUsername(trimmed);
+    setUsernameBusy(false);
+    if (!result.error) setMyUsername(trimmed);
+    setUsernameMsg(result.error ? { type: "error", text: result.error } : { type: "success", text: "Username saved." });
+  }
+
+  async function handleChangePassword() {
+    if (passwordBusy) return;
+    if (!currentPasswordInput || !newPasswordInput) { setPasswordMsg({ type: "error", text: "Enter your current and new password." }); return; }
+    setPasswordBusy(true);
+    setPasswordMsg(null);
+    const result = await changePassword(currentPasswordInput, newPasswordInput);
+    setPasswordBusy(false);
+    if (result.error) {
+      setPasswordMsg({ type: "error", text: result.error });
+    } else {
+      setCurrentPasswordInput("");
+      setNewPasswordInput("");
+      setPasswordMsg({ type: "success", text: "Password updated." });
+    }
+  }
+
+  // ---- Friends ----
+  async function refreshFriends() {
+    setFriendsLoading(true);
+    const myProfile = await getProfile(user.uid);
+    const ids = myProfile?.friendUids || [];
+    setFriendIds(ids);
+    const entries = await Promise.all(ids.map(async (uid) => [uid, await getProfile(uid)]));
+    setFriendsData(Object.fromEntries(entries.filter(([, p]) => p)));
+    setFriendsLoading(false);
+  }
+
+  async function refreshFriendRequests() {
+    const result = await listFriendRequests();
+    setFriendRequests(result);
+  }
+
+  useEffect(() => {
+    if (activeTab !== "friends" || !myUsername) return;
+    refreshFriends();
+    refreshFriendRequests();
+  }, [activeTab, myUsername, friendsRefreshTick]);
+
+  async function handleSendFriendRequest() {
+    if (friendSearchBusy || !friendSearchInput.trim()) return;
+    setFriendSearchBusy(true);
+    setFriendSearchMsg(null);
+    const result = await sendFriendRequest(friendSearchInput.trim());
+    setFriendSearchBusy(false);
+    if (result.error) {
+      setFriendSearchMsg({ type: "error", text: result.error });
+    } else {
+      setFriendSearchInput("");
+      setFriendSearchMsg({ type: "success", text: "Request sent!" });
+      setFriendsRefreshTick((t) => t + 1);
+    }
+  }
+
+  async function handleAcceptRequest(requestId) {
+    await acceptFriendRequest(requestId);
+    setFriendsRefreshTick((t) => t + 1);
+  }
+  async function handleDeclineRequest(requestId) {
+    await declineFriendRequest(requestId);
+    setFriendsRefreshTick((t) => t + 1);
+  }
+  async function handleCancelRequest(requestId) {
+    await cancelFriendRequest(requestId);
+    setFriendsRefreshTick((t) => t + 1);
+  }
+  async function handleRemoveFriend(friendUid) {
+    await removeFriend(friendUid);
+    setSelectedFriendUid(null);
+    setFriendsRefreshTick((t) => t + 1);
+  }
 
   async function clearAllData() {
     try { await window.storage.delete(STORAGE_KEY); } catch (e) {}
@@ -2282,7 +2416,7 @@ function AppContent({ user }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <button onClick={() => setCrateModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
-            <button onClick={() => setSettingsOpen(true)} aria-label="Settings" className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, width: 30, height: 30, color: "#8A8578", cursor: "pointer" }}><Gear size={14} /></button>
+            <button onClick={() => setSettingsOpen(true)} aria-label="Account & Settings" className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, width: 30, height: 30, color: "#8A8578", cursor: "pointer" }}><IconUser size={15} /></button>
           </div>
         </div>
 
@@ -2951,6 +3085,172 @@ function AppContent({ user }) {
           </div>
         )}
 
+        {/* Friends */}
+        {activeTab === "friends" && (
+          <div style={{ marginBottom: 20 }}>
+            {!myUsername ? (
+              <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "20px 14px", textAlign: "center" }}>
+                <IconUsers size={26} color="#5C6773" style={{ marginBottom: 8 }} />
+                <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 12px" }}>Set a username to add friends and let them find you.</p>
+                <div style={{ display: "flex", gap: 6, maxWidth: 280, margin: "0 auto" }}>
+                  <input value={usernameInput} onChange={(e) => { setUsernameInput(e.target.value); setUsernameMsg(null); }} placeholder="Choose a username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                  <button onClick={handleSaveUsername} disabled={usernameBusy || !usernameInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}>Save</button>
+                </div>
+                {usernameMsg && <p style={{ fontSize: 11, marginTop: 8, color: usernameMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{usernameMsg.text}</p>}
+              </div>
+            ) : selectedFriendUid ? (() => {
+              const friend = friendsData[selectedFriendUid];
+              if (!friend) return null;
+              const friendLevel = levelFromXP(friend.totalXP || 0);
+              return (
+                <div>
+                  <button onClick={() => setSelectedFriendUid(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 12, padding: 0 }}><ChevronLeft size={14} /> All friends</button>
+
+                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                      <span style={{ fontSize: 15, fontWeight: 700 }}>{friend.username}</span>
+                      <button onClick={() => handleRemoveFriend(selectedFriendUid)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "4px 10px", fontSize: 10, color: "#8A2E44", cursor: "pointer" }}>Remove Friend</button>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: 16, color: accent, fontFamily: "Georgia, serif" }}>Lv {friendLevel.level}</span>
+                      <Flame size={13} color={friend.streak > 0 ? "#C1652B" : "#4A5563"} fill={friend.streak > 0 ? "#C1652B" : "none"} />
+                      <span style={{ fontSize: 12, color: friend.streak > 0 ? "#C1652B" : "#8A8578", fontFamily: "ui-monospace, Menlo, monospace" }}>{friend.streak || 0}d streak</span>
+                    </div>
+                    <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${(friendLevel.into / friendLevel.need) * 100}%`, background: accent, borderRadius: 4 }} />
+                    </div>
+                  </div>
+
+                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {GEAR_SLOTS.map((slot) => {
+                        const itemId = friend.equipped?.[slot];
+                        const item = itemId ? ITEM_CATALOGUE.find((i) => i.id === itemId) : null;
+                        const rar = item ? RARITIES[item.rarity] : null;
+                        return (
+                          <div key={slot} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: item ? rar.glow : "#1F2836", border: `1px solid ${item ? rar.color : "#2C3947"}`, borderRadius: 8, padding: "7px 4px" }}>
+                            <div style={{ height: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>{item ? item.icon(rar.color) : <X size={12} color="#33414F" />}</div>
+                            <span style={{ fontSize: 8, fontWeight: 700, color: item ? rar.color : "#4A5563", textAlign: "center" }}>{item ? item.label : SLOT_LABELS[slot]}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Routines</div>
+                    {(friend.workoutPlans || []).length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No workout plans yet.</p>}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {(friend.workoutPlans || []).map((plan) => (
+                        <div key={plan.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#EDE4D3" }}>
+                          <span>{plan.name}</span>
+                          <span style={{ color: "#5C6773" }}>{plan.exercises.length} exercises</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent Workouts</div>
+                    {(friend.workoutHistory || []).length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No workouts logged yet.</p>}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {(friend.workoutHistory || []).map((h) => (
+                        <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
+                          <span style={{ fontSize: 12, color: "#EDE4D3" }}>{h.planName}</span>
+                          <span style={{ fontSize: 10, color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+                          <span style={{ fontSize: 10, color: accent }}>{h.totalVolume} vol</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })() : (
+              <>
+                <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                  {[
+                    { key: "friends", label: "Friends" },
+                    { key: "requests", label: "Requests" },
+                    { key: "add", label: "Add" },
+                  ].map((t) => (
+                    <button key={t.key} onClick={() => setActiveFriendsTab(t.key)} className="qlog-btn" style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 20, border: `1px solid ${activeFriendsTab === t.key ? accent : "#33414F"}`, background: activeFriendsTab === t.key ? accent : "#232E3D", color: activeFriendsTab === t.key ? "#1B2430" : "#8A8578", cursor: "pointer", position: "relative" }}>
+                      {t.label}
+                      {t.key === "requests" && friendRequests.incoming.length > 0 && (
+                        <span style={{ position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#8A2E44", color: "#EDE4D3", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>{friendRequests.incoming.length}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {activeFriendsTab === "friends" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {friendsLoading && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center" }}>Loading...</p>}
+                    {!friendsLoading && friendIds.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center" }}>No friends yet — add one in the Add tab.</p>}
+                    {friendIds.map((uid) => {
+                      const friend = friendsData[uid];
+                      if (!friend) return null;
+                      const friendLevel = levelFromXP(friend.totalXP || 0);
+                      return (
+                        <button key={uid} onClick={() => setSelectedFriendUid(uid)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{friend.username}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>Lv {friendLevel.level}</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: friend.streak > 0 ? "#C1652B" : "#5C6773" }}><Flame size={11} color={friend.streak > 0 ? "#C1652B" : "#5C6773"} /> {friend.streak || 0}d</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {activeFriendsTab === "requests" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Incoming</div>
+                      {friendRequests.incoming.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No incoming requests.</p>}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {friendRequests.incoming.map((r) => (
+                          <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
+                            <span style={{ fontSize: 12, color: "#EDE4D3" }}>{r.fromUsername}</span>
+                            <div style={{ display: "flex", gap: 6 }}>
+                              <button onClick={() => handleAcceptRequest(r.id)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Accept</button>
+                              <button onClick={() => handleDeclineRequest(r.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Decline</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Outgoing</div>
+                      {friendRequests.outgoing.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No outgoing requests.</p>}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {friendRequests.outgoing.map((r) => (
+                          <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
+                            <span style={{ fontSize: 12, color: "#8A8578" }}>{r.toUsername} <span style={{ color: "#5C6773" }}>· pending</span></span>
+                            <button onClick={() => handleCancelRequest(r.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeFriendsTab === "add" && (
+                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                    <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 10px" }}>Enter a friend's username to send them a request.</p>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                      <input value={friendSearchInput} onChange={(e) => { setFriendSearchInput(e.target.value); setFriendSearchMsg(null); }} onKeyDown={(e) => e.key === "Enter" && handleSendFriendRequest()} placeholder="username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                      <button onClick={handleSendFriendRequest} disabled={friendSearchBusy || !friendSearchInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}>Send</button>
+                    </div>
+                    {friendSearchMsg && <p style={{ fontSize: 12, margin: 0, color: friendSearchMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{friendSearchMsg.text}</p>}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Exercise picker */}
         {exercisePickerFor && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => { setExercisePickerFor(null); setCustomExerciseForm(null); }}>
@@ -3082,91 +3382,101 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 400, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
               <button onClick={() => { setSettingsOpen(false); setConfirmClear(false); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 20px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Settings</h3>
+              <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Settings</h3>
 
-              {/* Default calendar view */}
-              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>DEFAULT CALENDAR VIEW</p>
-              <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-                {["day", "week", "month"].map((v) => (
-                  <button key={v} onClick={() => setCalView(v)} className="qlog-btn"
-                    style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 0", borderRadius: 8, border: "1px solid #33414F", background: calView === v ? accent : "#1F2836", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>
-                    {v}
-                  </button>
-                ))}
-              </div>
+              <SettingsSection title="ACCOUNT" defaultOpen={true}>
+                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 3px" }}>Email</p>
+                <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 14px" }}>{user?.email}</p>
 
-              {/* Workout settings */}
-              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>WORKOUT</p>
-              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", borderRadius: 10, padding: "10px 14px", marginBottom: 20, cursor: "pointer" }}>
-                <span style={{ fontSize: 12, color: "#EDE4D3" }}>Auto-start rest timer after logging a set</span>
-                <input type="checkbox" checked={autoRestTimer} onChange={(e) => setAutoRestTimer(e.target.checked)} />
-              </label>
-
-              {/* XP multiplier breakdown */}
-              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>HOW XP MULTIPLIERS WORK</p>
-              <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>🔥 Streak bonus (stacks daily)</p>
-                {[["3+ days", "+10%"], ["7+ days", "+20%"], ["14+ days", "+35%"], ["30+ days", "+50%"]].map(([d, b]) => (
-                  <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
-                    <span>{d}</span><span style={{ color: "#C1652B", fontWeight: 700 }}>{b}</span>
-                  </div>
-                ))}
-                <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
-                <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>⚡ Combo bonus (same day)</p>
-                {[["1st–2nd quest", "+0%"], ["3rd–4th quest", "+15%"], ["5th+ quest", "+30%"]].map(([d, b]) => (
-                  <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
-                    <span>{d}</span><span style={{ color: accent, fontWeight: 700 }}>{b}</span>
-                  </div>
-                ))}
-                <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
-                <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Bonuses add together, then apply to the base XP. Beat the focus timer clock for an extra +25% on top.</p>
-              </div>
-
-              {/* Notifications */}
-              {"Notification" in window && (
-                <>
-                  <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>REMINDERS</p>
-                  <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}>
-                    <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 10px" }}>
-                      {notifPermission === "granted" ? "Reminders are enabled. You'll get nudges for habits, overdue tasks and your weekly battle." : "Get reminded about habits, overdue tasks and your weekly battle."}
-                    </p>
-                    {notifPermission === "denied" && (
-                      <p style={{ fontSize: 11, color: "#8A2E44", margin: "0 0 10px" }}>Notifications are blocked in your browser settings. Enable them there first, then come back here.</p>
-                    )}
-                    {notifPermission !== "denied" && (
-                      <button onClick={async () => {
-                        await requestNotifPermission();
-                      }} className="qlog-btn" style={{ width: "100%", background: notifPermission === "granted" ? "#1B2430" : accent, border: `1px solid ${notifPermission === "granted" ? "#33414F" : accent}`, borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: notifPermission === "granted" ? "#8A8578" : "#1B2430", cursor: "pointer" }}>
-                        {notifPermission === "granted" ? "🔔 Re-register reminders" : "🔔 Enable reminders"}
-                      </button>
-                    )}
-                  </div>
-                </>
-              )}
-
-              {/* Account */}
-              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>ACCOUNT</p>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", borderRadius: 10, padding: "10px 14px", marginBottom: 20 }}>
-                <span style={{ fontSize: 12, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user?.email}</span>
-                <button onClick={logOut} className="qlog-btn" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#8A8578", cursor: "pointer" }}>Log Out</button>
-              </div>
-
-              {/* Clear all data */}
-              <p style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", margin: "0 0 8px", letterSpacing: 0.5 }}>DANGER ZONE</p>
-              {!confirmClear ? (
-                <button onClick={() => setConfirmClear(true)} className="qlog-btn"
-                  style={{ width: "100%", background: "transparent", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A2E44", cursor: "pointer" }}>
-                  Clear all data
-                </button>
-              ) : (
-                <div style={{ background: "rgba(138,46,68,0.1)", border: "1px solid #8A2E44", borderRadius: 10, padding: "14px" }}>
-                  <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 12px", fontWeight: 600 }}>This deletes all quests, XP, streaks, and habits permanently. Are you sure?</p>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={clearAllData} className="qlog-btn" style={{ flex: 1, background: "#8A2E44", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Yes, clear everything</button>
-                    <button onClick={() => setConfirmClear(false)} className="qlog-btn" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
-                  </div>
+                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Username</p>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <input value={usernameInput} onChange={(e) => { setUsernameInput(e.target.value); setUsernameMsg(null); }} placeholder="Add a display name" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                  <button onClick={handleSaveUsername} disabled={usernameBusy || !usernameInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: usernameBusy ? "default" : "pointer", opacity: usernameBusy || !usernameInput.trim() ? 0.6 : 1 }}>Save</button>
                 </div>
+                {usernameMsg && <p style={{ fontSize: 11, margin: "0 0 14px", color: usernameMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{usernameMsg.text}</p>}
+                {!usernameMsg && <div style={{ marginBottom: 14 }} />}
+
+                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Change password</p>
+                <input type="password" autoComplete="current-password" value={currentPasswordInput} onChange={(e) => { setCurrentPasswordInput(e.target.value); setPasswordMsg(null); }} placeholder="Current password" style={{ width: "100%", marginBottom: 6, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                <input type="password" autoComplete="new-password" value={newPasswordInput} onChange={(e) => { setNewPasswordInput(e.target.value); setPasswordMsg(null); }} placeholder="New password (min 6 characters)" style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                {passwordMsg && <p style={{ fontSize: 11, margin: "0 0 8px", color: passwordMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{passwordMsg.text}</p>}
+                <button onClick={handleChangePassword} disabled={passwordBusy} className="qlog-btn" style={{ width: "100%", background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: passwordBusy ? "default" : "pointer", opacity: passwordBusy ? 0.6 : 1, marginBottom: 16 }}>
+                  {passwordBusy ? "Updating..." : "Update Password"}
+                </button>
+
+                <button onClick={logOut} className="qlog-btn" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontSize: 12, fontWeight: 600, color: "#8A8578", cursor: "pointer" }}>Log Out</button>
+              </SettingsSection>
+
+              <SettingsSection title="PREFERENCES">
+                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Default calendar view</p>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  {["day", "week", "month"].map((v) => (
+                    <button key={v} onClick={() => setCalView(v)} className="qlog-btn"
+                      style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 0", borderRadius: 8, border: "1px solid #33414F", background: calView === v ? accent : "#1F2836", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", borderRadius: 10, padding: "10px 14px", cursor: "pointer" }}>
+                  <span style={{ fontSize: 12, color: "#EDE4D3" }}>Auto-start rest timer after logging a set</span>
+                  <input type="checkbox" checked={autoRestTimer} onChange={(e) => setAutoRestTimer(e.target.checked)} />
+                </label>
+              </SettingsSection>
+
+              <SettingsSection title="HOW XP MULTIPLIERS WORK">
+                <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px" }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>🔥 Streak bonus (stacks daily)</p>
+                  {[["3+ days", "+10%"], ["7+ days", "+20%"], ["14+ days", "+35%"], ["30+ days", "+50%"]].map(([d, b]) => (
+                    <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
+                      <span>{d}</span><span style={{ color: "#C1652B", fontWeight: 700 }}>{b}</span>
+                    </div>
+                  ))}
+                  <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
+                  <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>⚡ Combo bonus (same day)</p>
+                  {[["1st–2nd quest", "+0%"], ["3rd–4th quest", "+15%"], ["5th+ quest", "+30%"]].map(([d, b]) => (
+                    <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
+                      <span>{d}</span><span style={{ color: accent, fontWeight: 700 }}>{b}</span>
+                    </div>
+                  ))}
+                  <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
+                  <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Bonuses add together, then apply to the base XP. Beat the focus timer clock for an extra +25% on top.</p>
+                </div>
+              </SettingsSection>
+
+              {"Notification" in window && (
+                <SettingsSection title="REMINDERS">
+                  <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 10px" }}>
+                    {notifPermission === "granted" ? "Reminders are enabled. You'll get nudges for habits, overdue tasks and your weekly battle." : "Get reminded about habits, overdue tasks and your weekly battle."}
+                  </p>
+                  {notifPermission === "denied" && (
+                    <p style={{ fontSize: 11, color: "#8A2E44", margin: "0 0 10px" }}>Notifications are blocked in your browser settings. Enable them there first, then come back here.</p>
+                  )}
+                  {notifPermission !== "denied" && (
+                    <button onClick={async () => {
+                      await requestNotifPermission();
+                    }} className="qlog-btn" style={{ width: "100%", background: notifPermission === "granted" ? "#1B2430" : accent, border: `1px solid ${notifPermission === "granted" ? "#33414F" : accent}`, borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: notifPermission === "granted" ? "#8A8578" : "#1B2430", cursor: "pointer" }}>
+                      {notifPermission === "granted" ? "🔔 Re-register reminders" : "🔔 Enable reminders"}
+                    </button>
+                  )}
+                </SettingsSection>
               )}
+
+              <SettingsSection title="DANGER ZONE">
+                {!confirmClear ? (
+                  <button onClick={() => setConfirmClear(true)} className="qlog-btn"
+                    style={{ width: "100%", background: "transparent", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A2E44", cursor: "pointer" }}>
+                    Clear all data
+                  </button>
+                ) : (
+                  <div style={{ background: "rgba(138,46,68,0.1)", border: "1px solid #8A2E44", borderRadius: 10, padding: "14px" }}>
+                    <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 12px", fontWeight: 600 }}>This deletes all quests, XP, streaks, and habits permanently. Are you sure?</p>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={clearAllData} className="qlog-btn" style={{ flex: 1, background: "#8A2E44", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Yes, clear everything</button>
+                      <button onClick={() => setConfirmClear(false)} className="qlog-btn" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </SettingsSection>
             </div>
           </div>
         )}
@@ -3342,6 +3652,7 @@ function AppContent({ user }) {
           { key: "habits", label: "Habits", Icon: Repeat },
           { key: "workout", label: "Workout", Icon: IconDumbbell },
           { key: "gear", label: "Gear", Icon: IconShield },
+          { key: "friends", label: "Friends", Icon: IconUsers },
         ].map(({ key, label, Icon }) => (
           <button key={key} onClick={() => { setActiveTab(key); setFabMenuOpen(false); }} className="qlog-btn" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", padding: "9px 0 8px", cursor: "pointer", color: activeTab === key ? accent : "#8A8578" }}>
             <Icon size={19} color={activeTab === key ? accent : "#8A8578"} />

@@ -1,8 +1,12 @@
 import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, deleteField } from "firebase/firestore";
+import {
+  getFirestore, doc, getDoc, setDoc, deleteDoc, updateDoc, onSnapshot, deleteField,
+  collection, query, where, getDocs, addDoc, serverTimestamp,
+} from "firebase/firestore";
 import {
   getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword,
-  signOut, sendPasswordResetEmail,
+  signOut, sendPasswordResetEmail, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider,
+  deleteUser,
 } from "firebase/auth";
 
 const firebaseConfig = {
@@ -40,16 +44,49 @@ function friendlyAuthError(e) {
   return AUTH_ERROR_MESSAGES[e.code] || e.message || "Something went wrong — please try again.";
 }
 
+export function normalizeUsername(name) {
+  return (name || "").trim().toLowerCase();
+}
+
+export async function isUsernameAvailable(name) {
+  const norm = normalizeUsername(name);
+  if (!norm) return false;
+  try {
+    const snap = await getDoc(doc(db, "usernames", norm));
+    return !snap.exists();
+  } catch (e) {
+    return false;
+  }
+}
+
 export function onAuthChange(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-export async function signUp(email, password) {
+export async function signUp(email, password, username) {
+  const norm = normalizeUsername(username);
+  if (!norm) return { user: null, error: "Choose a username." };
+  if (!/^[a-z0-9_]{3,20}$/.test(norm)) return { user: null, error: "Usernames must be 3-20 characters: letters, numbers, underscores only." };
+  const available = await isUsernameAvailable(norm);
+  if (!available) return { user: null, error: "That username is already taken." };
+
+  let cred;
   try {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    return { user: cred.user, error: null };
+    cred = await createUserWithEmailAndPassword(auth, email, password);
   } catch (e) {
     return { user: null, error: friendlyAuthError(e) };
+  }
+
+  try {
+    await updateProfile(cred.user, { displayName: username.trim() });
+    await setDoc(doc(db, "usernames", norm), { uid: cred.user.uid, username: username.trim(), createdAt: serverTimestamp() });
+    return { user: cred.user, error: null };
+  } catch (e) {
+    // The username was claimed by someone else in the split second between our
+    // availability check and here — roll back the account so we don't leave an
+    // orphaned, username-less user behind, and let them try again.
+    try { await deleteUser(cred.user); } catch (_) {}
+    return { user: null, error: "That username was just taken — please try another." };
   }
 }
 
@@ -64,6 +101,42 @@ export async function logIn(email, password) {
 
 export async function logOut() {
   await signOut(auth);
+}
+
+export async function updateUsername(name) {
+  const norm = normalizeUsername(name);
+  if (!norm) return { error: "Choose a username." };
+  if (!/^[a-z0-9_]{3,20}$/.test(norm)) return { error: "Usernames must be 3-20 characters: letters, numbers, underscores only." };
+
+  const oldNorm = normalizeUsername(auth.currentUser.displayName);
+  if (norm === oldNorm) {
+    // Unchanged name, just re-save the display casing.
+    try { await updateProfile(auth.currentUser, { displayName: name.trim() }); return { error: null }; }
+    catch (e) { return { error: friendlyAuthError(e) }; }
+  }
+
+  const available = await isUsernameAvailable(norm);
+  if (!available) return { error: "That username is already taken." };
+
+  try {
+    await setDoc(doc(db, "usernames", norm), { uid: auth.currentUser.uid, username: name.trim(), createdAt: serverTimestamp() });
+    if (oldNorm) { try { await deleteDoc(doc(db, "usernames", oldNorm)); } catch (_) {} }
+    await updateProfile(auth.currentUser, { displayName: name.trim() });
+    return { error: null };
+  } catch (e) {
+    return { error: friendlyAuthError(e) };
+  }
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  try {
+    const cred = EmailAuthProvider.credential(auth.currentUser.email, currentPassword);
+    await reauthenticateWithCredential(auth.currentUser, cred);
+    await updatePassword(auth.currentUser, newPassword);
+    return { error: null };
+  } catch (e) {
+    return { error: friendlyAuthError(e) };
+  }
 }
 
 export async function resetPassword(email) {
@@ -155,3 +228,99 @@ export const storage = {
     return unsub;
   },
 };
+
+// ---- Friends / social profile ----
+// The shareable subset of a user's data lives in its own doc so Firestore
+// rules can let friends read it without exposing the private `storage/{uid}`
+// document. `friendUids` on this doc is never written by this mirror — only
+// the /api/friends server route (via firebase-admin) touches it, since
+// accepting a friend requires updating *both* users' docs at once, which a
+// client can never do for someone else's doc under per-owner security rules.
+export async function saveProfile(fields) {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try {
+    await setDoc(doc(db, "profiles", uid), fields, { merge: true });
+  } catch (e) {
+    console.error("saveProfile failed", e);
+  }
+}
+
+export async function getProfile(uid) {
+  try {
+    const snap = await getDoc(doc(db, "profiles", uid));
+    return snap.exists() ? snap.data() : null;
+  } catch (e) {
+    console.error("getProfile failed", e);
+    return null;
+  }
+}
+
+export async function sendFriendRequest(username) {
+  const norm = normalizeUsername(username);
+  if (!norm) return { error: "Enter a username." };
+  const me = auth.currentUser;
+  const targetName = await getDoc(doc(db, "usernames", norm)).catch(() => null);
+  if (!targetName?.exists()) return { error: "No user with that username." };
+  const toUid = targetName.data().uid;
+  if (toUid === me.uid) return { error: "That's your own username." };
+
+  const myProfile = await getProfile(me.uid);
+  if (myProfile?.friendUids?.includes(toUid)) return { error: "You're already friends." };
+
+  const existing = await getDocs(query(collection(db, "friendRequests"), where("fromUid", "==", me.uid), where("toUid", "==", toUid), where("status", "==", "pending")));
+  if (!existing.empty) return { error: "Request already sent." };
+
+  try {
+    await addDoc(collection(db, "friendRequests"), {
+      fromUid: me.uid, fromUsername: me.displayName || me.email, toUid, toUsername: targetName.data().username,
+      status: "pending", createdAt: serverTimestamp(),
+    });
+    return { error: null };
+  } catch (e) {
+    return { error: "Couldn't send that request — try again." };
+  }
+}
+
+export async function listFriendRequests() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return { incoming: [], outgoing: [] };
+  const [incomingSnap, outgoingSnap] = await Promise.all([
+    getDocs(query(collection(db, "friendRequests"), where("toUid", "==", uid), where("status", "==", "pending"))),
+    getDocs(query(collection(db, "friendRequests"), where("fromUid", "==", uid), where("status", "==", "pending"))),
+  ]);
+  return {
+    incoming: incomingSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    outgoing: outgoingSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  };
+}
+
+export async function declineFriendRequest(requestId) {
+  try { await updateDoc(doc(db, "friendRequests", requestId), { status: "declined" }); return { error: null }; }
+  catch (e) { return { error: "Couldn't decline — try again." }; }
+}
+
+export async function cancelFriendRequest(requestId) {
+  try { await deleteDoc(doc(db, "friendRequests", requestId)); return { error: null }; }
+  catch (e) { return { error: "Couldn't cancel — try again." }; }
+}
+
+async function callFriendsApi(body) {
+  const idToken = await auth.currentUser?.getIdToken();
+  const resp = await fetch("/api/friends", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) return { error: data.error || "Something went wrong — try again." };
+  return { error: null };
+}
+
+export async function acceptFriendRequest(requestId) {
+  return callFriendsApi({ action: "accept", requestId });
+}
+
+export async function removeFriend(friendUid) {
+  return callFriendsApi({ action: "remove", friendUid });
+}
