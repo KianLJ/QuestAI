@@ -3062,7 +3062,8 @@ function AppContent({ user }) {
 
         {/* Gear */}
         {activeTab === "gear" && (
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 20 }}>
+          <div style={{ marginBottom: 20 }}>
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>⚔ Gear</span>
               <span style={{ fontSize: 9, color: "#5C6773", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
@@ -3100,6 +3101,51 @@ function AppContent({ user }) {
                 );
               })}
             </div>
+          </div>
+
+          {/* Collection by rarity */}
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Collection by Rarity</div>
+            {RARITY_ORDER.map((r) => {
+              const total = ITEM_CATALOGUE.filter((i) => i.rarity === r).length;
+              const owned = ITEM_CATALOGUE.filter((i) => i.rarity === r && inventory.includes(i.id)).length;
+              const rar = RARITIES[r];
+              return (
+                <div key={r} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 10, color: rar.color, width: 66, flexShrink: 0, fontWeight: 700 }}>{rar.label}</span>
+                  <div style={{ flex: 1, height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${total ? (owned / total) * 100 : 0}%`, background: rar.color, borderRadius: 4 }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: "#8A8578", fontFamily: "ui-monospace, Menlo, monospace", width: 38, textAlign: "right", flexShrink: 0 }}>{owned}/{total}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Set bonuses */}
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Set Bonuses</span>
+              <span style={{ fontSize: 9, color: "#5C6773" }}>{activeStats.activeSets.length} active</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {SETS.map((set) => {
+                const equippedCount = set.items.filter((id) => Object.values(equipped).includes(id)).length;
+                const isActive = activeStats.activeSets.some((s) => s.id === set.id);
+                return { set, equippedCount, isActive };
+              })
+                .sort((a, b) => (b.isActive - a.isActive) || (b.equippedCount / b.set.requiredCount - a.equippedCount / a.set.requiredCount))
+                .map(({ set, equippedCount, isActive }) => (
+                  <div key={set.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: isActive ? set.color + "18" : "#1F2836", border: `1px solid ${isActive ? set.color : "#2C3947"}`, borderRadius: 8, padding: "7px 10px" }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? set.color : "#8A8578" }}>{set.label}</div>
+                      <div style={{ fontSize: 9, color: "#5C6773" }}>{set.desc}</div>
+                    </div>
+                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: isActive ? set.color : "#5C6773", flexShrink: 0 }}>{equippedCount}/{set.requiredCount} equipped</span>
+                  </div>
+                ))}
+            </div>
+          </div>
           </div>
         )}
 
