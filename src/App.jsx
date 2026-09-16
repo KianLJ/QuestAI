@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import {
-  Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3,
+  Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3, Info,
   Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2,
   Timer, Loader2, Edit2, IconHome, IconCalendar, IconUser, IconUsers, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown,
   IconTitle, IconPalette,
@@ -289,6 +289,21 @@ Tiers: trivial=under 2min, easy=quick low focus, medium=20-45min, hard=multi-ste
   return { difficulty: parsed.difficulty, estMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.estMinutes) || 15))), reason: parsed.reason };
 }
 
+async function getExerciseGuide(exerciseName, primaryMuscle, equipment) {
+  const clean = await callQuestAI(
+    `Explain how to correctly perform the exercise "${exerciseName}" (primary muscle: ${primaryMuscle}, equipment: ${equipment}). Output ONLY a JSON object, nothing else — no prose, no markdown, no backticks.
+Give 4-7 short, clear, numbered setup-to-finish steps (each under 20 words) and 1-3 short form-safety tips.
+{"steps":["Step one...","Step two..."],"tips":["Tip one..."]}`,
+    30000, 1200
+  );
+  const parsed = JSON.parse(clean);
+  if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) throw new Error("bad response");
+  return {
+    steps: parsed.steps.slice(0, 8).map((s) => String(s).slice(0, 140)),
+    tips: Array.isArray(parsed.tips) ? parsed.tips.slice(0, 4).map((s) => String(s).slice(0, 140)) : [],
+  };
+}
+
 async function parseBrainDump(text, todayISO, upcomingShifts) {
   const futureDates = Array.from({ length: 14 }, (_, i) => addDaysLocal(todayISO, i));
   const dateList = futureDates.join(", ");
@@ -575,6 +590,7 @@ function AppContent({ user }) {
   const [historyExerciseId, setHistoryExerciseId] = useState(null); // set to view per-exercise progress
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
   const [sessionOverlayOpen, setSessionOverlayOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [, setWorkoutClockTick] = useState(0);
   const [aiEquipment, setAiEquipment] = useState([...EQUIPMENT_TYPES]);
   const [aiDaysPerWeek, setAiDaysPerWeek] = useState(3);
@@ -584,6 +600,11 @@ function AppContent({ user }) {
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState(null);
   const [aiPreview, setAiPreview] = useState(null); // { plans, schedule } once generated, before the user applies it
+  const [exerciseGuides, setExerciseGuides] = useState({}); // exerciseId -> { steps: [], tips: [] }, cached AI how-to
+  const [guideModalExerciseId, setGuideModalExerciseId] = useState(null);
+  const [guideLoadingId, setGuideLoadingId] = useState(null);
+  const [guideError, setGuideError] = useState(null);
+  const [exerciseBrowseFilter, setExerciseBrowseFilter] = useState({ muscle: null, equipment: null, q: "" });
 
   // Calendar state
   const [calView, setCalView] = useState("week"); // "day" | "week" | "month"
@@ -719,6 +740,7 @@ function AppContent({ user }) {
         setWorkoutHistory(data.workoutHistory || []);
         setCustomExercises(data.customExercises || []);
         setAutoRestTimer(data.autoRestTimer === undefined ? true : data.autoRestTimer);
+        setExerciseGuides(data.exerciseGuides || {});
         if (data.workoutSession) {
           const s = data.workoutSession;
           if (s.restTimer && s.restTimer.running && s.restTimer.endsAt) {
@@ -758,11 +780,11 @@ function AppContent({ user }) {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
           quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts,
           habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus,
-          workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer,
+          workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer, exerciseGuides,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded, workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded, workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer, exerciseGuides]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -804,6 +826,7 @@ function AppContent({ user }) {
         setWorkoutHistory(data.workoutHistory || []);
         setCustomExercises(data.customExercises || []);
         setAutoRestTimer(data.autoRestTimer === undefined ? true : data.autoRestTimer);
+        setExerciseGuides(data.exerciseGuides || {});
       } catch (e) {
         console.error("real-time sync parse error", e);
       }
@@ -1370,7 +1393,7 @@ function AppContent({ user }) {
   }
   function addExerciseToPlan(planId, exerciseId) {
     setWorkoutPlans((ps) => ps.map((p) => p.id === planId
-      ? { ...p, exercises: [...p.exercises, { id: Date.now() + Math.random(), exerciseId, sets: 3, targetReps: "8-12", restSeconds: 90 }] }
+      ? { ...p, exercises: [...p.exercises, { id: Date.now() + Math.random(), exerciseId, sets: 3, targetReps: "8-12", restSeconds: 90, targetWeight: "" }] }
       : p));
     setExercisePickerFor(null);
     setExercisePickerFilter({ muscle: null, equipment: null, q: "" });
@@ -1402,7 +1425,7 @@ function AppContent({ user }) {
       const ex = findExercise(pe.exerciseId, customExercises);
       return {
         exerciseId: pe.exerciseId, name: ex?.name || "Exercise", restSeconds: pe.restSeconds || 90, targetReps: pe.targetReps || "",
-        sets: Array.from({ length: pe.sets || 3 }, () => ({ weight: "", reps: "", completed: false })),
+        sets: Array.from({ length: pe.sets || 3 }, () => ({ weight: pe.targetWeight || "", reps: "", completed: false })),
       };
     });
     setWorkoutSession({ planId: plan.id, planName: plan.name, startedAt: Date.now(), exercises, restTimer: null, setsXp: 0 });
@@ -1433,6 +1456,12 @@ function AppContent({ user }) {
       });
       const nextSetsXp = (s.setsXp || 0) + WORKOUT_SET_XP;
       const restTimer = autoRestTimer ? { totalSeconds: restSeconds, secondsLeft: restSeconds, endsAt: Date.now() + restSeconds * 1000, running: true, exerciseIdx: exIdx, setIdx } : s.restTimer;
+      if (weight !== "" && weight != null) {
+        const exerciseId = s.exercises[exIdx].exerciseId;
+        setWorkoutPlans((ps) => ps.map((p) => p.id !== s.planId ? p : {
+          ...p, exercises: p.exercises.map((pe) => pe.exerciseId === exerciseId ? { ...pe, targetWeight: weight } : pe),
+        }));
+      }
       return { ...s, exercises, setsXp: nextSetsXp, restTimer };
     });
     setTotalXP((t) => t + WORKOUT_SET_XP);
@@ -1476,6 +1505,18 @@ function AppContent({ user }) {
   }
   function discardWorkout() { setWorkoutSession(null); setSessionOverlayOpen(false); }
   function deleteWorkoutHistoryEntry(id) { setWorkoutHistory((h) => h.filter((e) => e.id !== id)); }
+
+  function openExerciseGuide(ex) {
+    if (!ex) return;
+    setGuideModalExerciseId(ex.id);
+    setGuideError(null);
+    if (exerciseGuides[ex.id]) return;
+    setGuideLoadingId(ex.id);
+    getExerciseGuide(ex.name, ex.primaryMuscle, ex.equipment)
+      .then((guide) => setExerciseGuides((g) => ({ ...g, [ex.id]: guide })))
+      .catch((e) => { console.error("getExerciseGuide failed:", e); setGuideError(e?.message ? `Couldn't load instructions: ${e.message}` : "Couldn't load instructions right now. Try again."); })
+      .finally(() => setGuideLoadingId(null));
+  }
 
   async function handleGenerateWorkout() {
     if (aiGenerating) return;
@@ -2450,7 +2491,7 @@ function AppContent({ user }) {
         <div style={{ position: "fixed", inset: 0, background: "#141C27", zIndex: 72, overflowY: "auto", padding: "16px 14px 100px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <button onClick={() => setSessionOverlayOpen(false)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}><ChevronLeft size={16} /> Minimize</button>
-            <button onClick={() => { if (window.confirm("Discard this workout? Logged sets won't be saved.")) discardWorkout(); }} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", fontSize: 12 }}>Discard</button>
+            <button onClick={() => setDiscardConfirmOpen(true)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", fontSize: 12 }}>Discard</button>
           </div>
           <h2 style={{ margin: "6px 0 2px", fontSize: 18, fontWeight: 700, fontFamily: "Georgia, serif" }}>{workoutSession.planName}</h2>
           <div style={{ fontSize: 12, color: "#8A8578", marginBottom: 14, fontFamily: "ui-monospace, Menlo, monospace" }}>{fmtTime(Math.floor((Date.now() - workoutSession.startedAt) / 1000))} elapsed</div>
@@ -2475,7 +2516,7 @@ function AppContent({ user }) {
             {workoutSession.exercises.map((ex, exIdx) => (
               <div key={exIdx} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{ex.name}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 5 }}>{ex.name} <button onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} aria-label="How to perform" title="How to perform" style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={13} /></button></span>
                   <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -2497,6 +2538,19 @@ function AppContent({ user }) {
           <button onClick={finishWorkout} className="qlog-btn" style={{ width: "100%", marginTop: 16, background: accent, border: "none", borderRadius: 10, padding: "13px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>Finish Workout</button>
 
           {workoutXpPop && <div className="xp-pop" style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", fontWeight: 700, fontSize: 14, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{workoutXpPop.xp} XP</div>}
+        </div>
+      )}
+
+      {discardConfirmOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={() => setDiscardConfirmOpen(false)}>
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Discard this workout?</h3>
+            <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 18px" }}>Logged sets won't be saved.</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={() => { discardWorkout(); setDiscardConfirmOpen(false); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>Discard workout</button>
+              <button onClick={() => setDiscardConfirmOpen(false)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3136,6 +3190,7 @@ function AppContent({ user }) {
                 { key: "schedule", label: "Schedule", Icon: IconCalendar },
                 { key: "history", label: "History", Icon: Timer },
                 { key: "generate", label: "Generate", Icon: Wand2 },
+                { key: "exercises", label: "Exercises", Icon: IconDumbbell },
               ].map((t) => {
                 const on = activeWorkoutTab === t.key;
                 return (
@@ -3192,7 +3247,12 @@ function AppContent({ user }) {
                       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
                         {todayPlan.exercises.map((pe) => {
                           const ex = findExercise(pe.exerciseId, customExercises);
-                          return <div key={pe.id} style={{ fontSize: 12, color: "#EDE4D3", display: "flex", justifyContent: "space-between" }}><span>{ex?.name || "?"}</span><span style={{ color: "#5C6773" }}>{pe.sets} × {pe.targetReps}</span></div>;
+                          return (
+                            <div key={pe.id} style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <span style={{ display: "flex", alignItems: "center", gap: 5 }}>{ex?.name || "?"} <button onClick={() => openExerciseGuide(ex)} aria-label="How to perform" title="How to perform" className="qlog-btn" style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={12} /></button></span>
+                              <span style={{ color: "#5C6773" }}>{pe.sets} × {pe.targetReps}{pe.targetWeight ? ` @ ${pe.targetWeight}` : ""}</span>
+                            </div>
+                          );
                         })}
                       </div>
                       {!workoutSession && (
@@ -3231,13 +3291,14 @@ function AppContent({ user }) {
                             return (
                               <div key={pe.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                                  <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex?.name || "?"}</span>
+                                  <span style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 5 }}>{ex?.name || "?"} <button onClick={() => openExerciseGuide(ex)} aria-label="How to perform" title="How to perform" style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={12} /></button></span>
                                   <button onClick={() => removePlanExercise(plan.id, pe.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><X size={12} /></button>
                                 </div>
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                                   <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Sets <input type="number" min="1" value={pe.sets} onChange={(e) => updatePlanExercise(plan.id, pe.id, { sets: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 40, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
                                   <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Reps <input value={pe.targetReps} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetReps: e.target.value })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
                                   <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Rest(s) <input type="number" min="0" value={pe.restSeconds} onChange={(e) => updatePlanExercise(plan.id, pe.id, { restSeconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Weight <input type="number" min="0" step="0.5" value={pe.targetWeight || ""} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetWeight: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="0" style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
                                 </div>
                               </div>
                             );
@@ -3277,11 +3338,48 @@ function AppContent({ user }) {
               historyExerciseId ? (() => {
                 const ex = findExercise(historyExerciseId, customExercises);
                 const sessions = workoutHistory.filter((h) => h.exercises.some((e) => e.exerciseId === historyExerciseId)).sort((a, b) => (a.date < b.date ? 1 : -1));
+                const points = sessions.map((h) => {
+                  const entry = h.exercises.find((e) => e.exerciseId === historyExerciseId);
+                  const best = entry.sets.reduce((b, s) => (s.weight > (b?.weight || 0) ? s : b), null);
+                  const volume = entry.sets.reduce((v, s) => v + s.weight * s.reps, 0);
+                  return { date: h.date, weight: best?.weight || 0, reps: best?.reps || 0, volume };
+                }).reverse(); // oldest first for the chart
+                const maxWeight = Math.max(1, ...points.map((p) => p.weight));
+                const minWeight = Math.min(...points.map((p) => p.weight), maxWeight);
+                const prWeight = maxWeight;
+                const chartW = 300, chartH = 90, padX = 6, padY = 10;
+                const stepX = points.length > 1 ? (chartW - padX * 2) / (points.length - 1) : 0;
+                const yFor = (w) => {
+                  if (maxWeight === minWeight) return chartH / 2;
+                  return padY + (chartH - padY * 2) * (1 - (w - minWeight) / (maxWeight - minWeight));
+                };
+                const linePoints = points.map((p, i) => `${padX + i * stepX},${yFor(p.weight)}`).join(" ");
                 return (
                   <div>
                     <button onClick={() => setHistoryExerciseId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All exercises</button>
-                    <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>{ex?.name || "Exercise"}</div>
-                    {sessions.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No history for this exercise yet.</p>}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700 }}>{ex?.name || "Exercise"}</span>
+                      <button onClick={() => openExerciseGuide(ex)} aria-label="How to perform" title="How to perform" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 0, display: "inline-flex" }}><Info size={14} /></button>
+                    </div>
+                    {points.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No history for this exercise yet.</p>}
+                    {points.length > 0 && (
+                      <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 10px 6px", marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Weight progress</span>
+                          <span style={{ fontSize: 11, color: accent, fontWeight: 700 }}>PR {prWeight}{points[points.length - 1]?.weight === prWeight ? " 🔥" : ""}</span>
+                        </div>
+                        {points.length > 1 ? (
+                          <svg viewBox={`0 0 ${chartW} ${chartH}`} width="100%" height={chartH} preserveAspectRatio="none">
+                            <polyline points={linePoints} fill="none" stroke={accent} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+                            {points.map((p, i) => (
+                              <circle key={i} cx={padX + i * stepX} cy={yFor(p.weight)} r={p.weight === prWeight ? 3.5 : 2.5} fill={p.weight === prWeight ? accent : "#EDE4D3"} />
+                            ))}
+                          </svg>
+                        ) : (
+                          <p style={{ fontSize: 11, color: "#5C6773", margin: "4px 0 8px" }}>Log another session to see a trend line.</p>
+                        )}
+                      </div>
+                    )}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {sessions.map((h) => {
                         const entry = h.exercises.find((e) => e.exerciseId === historyExerciseId);
@@ -3290,7 +3388,7 @@ function AppContent({ user }) {
                         return (
                           <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
                             <span style={{ fontSize: 11, color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
-                            <span style={{ fontSize: 12, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{best ? `${best.weight} × ${best.reps}` : "-"}</span>
+                            <span style={{ fontSize: 12, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{best ? `${best.weight} × ${best.reps}` : "-"}{best?.weight === prWeight && prWeight > 0 ? " 🏆" : ""}</span>
                             <span style={{ fontSize: 10, color: accent }}>{volume} vol</span>
                           </div>
                         );
@@ -3453,6 +3551,50 @@ function AppContent({ user }) {
                 )}
               </div>
             )}
+
+            {activeWorkoutTab === "exercises" && (() => {
+              const allExercises = [...EXERCISE_CATALOGUE, ...customExercises];
+              const filtered = allExercises.filter((ex) =>
+                (!exerciseBrowseFilter.muscle || ex.muscleGroups.includes(exerciseBrowseFilter.muscle)) &&
+                (!exerciseBrowseFilter.equipment || ex.equipment === exerciseBrowseFilter.equipment) &&
+                (!exerciseBrowseFilter.q || ex.name.toLowerCase().includes(exerciseBrowseFilter.q.toLowerCase()))
+              );
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <input value={exerciseBrowseFilter.q} onChange={(e) => setExerciseBrowseFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search exercises..." style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    <button onClick={() => setExerciseBrowseFilter((f) => ({ ...f, muscle: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exerciseBrowseFilter.muscle ? accent : "#33414F"}`, background: !exerciseBrowseFilter.muscle ? accent : "transparent", color: !exerciseBrowseFilter.muscle ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All muscles</button>
+                    {MUSCLE_GROUPS.map((m) => (
+                      <button key={m} onClick={() => setExerciseBrowseFilter((f) => ({ ...f, muscle: f.muscle === m ? null : m }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exerciseBrowseFilter.muscle === m ? accent : "#33414F"}`, background: exerciseBrowseFilter.muscle === m ? accent : "transparent", color: exerciseBrowseFilter.muscle === m ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{MUSCLE_LABELS[m]}</button>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    <button onClick={() => setExerciseBrowseFilter((f) => ({ ...f, equipment: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exerciseBrowseFilter.equipment ? accent : "#33414F"}`, background: !exerciseBrowseFilter.equipment ? accent : "transparent", color: !exerciseBrowseFilter.equipment ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All equipment</button>
+                    {EQUIPMENT_TYPES.map((eq) => (
+                      <button key={eq} onClick={() => setExerciseBrowseFilter((f) => ({ ...f, equipment: f.equipment === eq ? null : eq }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exerciseBrowseFilter.equipment === eq ? accent : "#33414F"}`, background: exerciseBrowseFilter.equipment === eq ? accent : "transparent", color: exerciseBrowseFilter.equipment === eq ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{EQUIPMENT_LABELS[eq]}</button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#5C6773" }}>{filtered.length} exercise{filtered.length === 1 ? "" : "s"}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {filtered.map((ex) => (
+                      <button key={ex.id} onClick={() => openExerciseGuide(ex)} className="qlog-btn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
+                        <div>
+                          <div style={{ fontSize: 12.5, color: "#EDE4D3", fontWeight: 600, marginBottom: 2 }}>{ex.name}</div>
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                            {ex.muscleGroups.slice(0, 3).map((m) => <span key={m} style={{ fontSize: 9, color: accent, background: accent + "18", borderRadius: 10, padding: "1px 6px" }}>{MUSCLE_LABELS[m]}</span>)}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
+                          <Info size={14} color="#8A8578" />
+                        </div>
+                      </button>
+                    ))}
+                    {filtered.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No exercises match those filters.</p>}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -3734,10 +3876,13 @@ function AppContent({ user }) {
                 {[...EXERCISE_CATALOGUE, ...customExercises]
                   .filter((ex) => (!exercisePickerFilter.muscle || ex.muscleGroups.includes(exercisePickerFilter.muscle)) && (!exercisePickerFilter.equipment || ex.equipment === exercisePickerFilter.equipment) && (!exercisePickerFilter.q || ex.name.toLowerCase().includes(exercisePickerFilter.q.toLowerCase())))
                   .map((ex) => (
-                    <button key={ex.id} onClick={() => addExerciseToPlan(exercisePickerFor, ex.id)} className="qlog-btn" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", cursor: "pointer", textAlign: "left" }}>
-                      <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex.name}</span>
-                      <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
-                    </button>
+                    <div key={ex.id} style={{ display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
+                      <button onClick={() => addExerciseToPlan(exercisePickerFor, ex.id)} className="qlog-btn" style={{ flex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+                        <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex.name}</span>
+                        <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); openExerciseGuide(ex); }} aria-label="How to perform" title="How to perform" className="qlog-btn" style={{ flex: "0 0 auto", background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 2 }}><Info size={14} /></button>
+                    </div>
                   ))}
               </div>
               {customExerciseForm ? (
@@ -3761,6 +3906,46 @@ function AppContent({ user }) {
             </div>
           </div>
         )}
+
+        {guideModalExerciseId && (() => {
+          const ex = findExercise(guideModalExerciseId, customExercises);
+          const guide = exerciseGuides[guideModalExerciseId];
+          const loading = guideLoadingId === guideModalExerciseId;
+          return (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setGuideModalExerciseId(null)}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 400, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
+                <button onClick={() => setGuideModalExerciseId(null)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>{ex?.name || "Exercise"}</h3>
+                <p style={{ margin: "0 0 14px", fontSize: 11, color: "#8A8578" }}>{MUSCLE_LABELS[ex?.primaryMuscle] || ""} · {EQUIPMENT_LABELS[ex?.equipment] || ""}</p>
+                {loading && <p style={{ fontSize: 12, color: "#8A8578", display: "flex", alignItems: "center", gap: 6 }}><Loader2 size={14} className="spin" /> Loading instructions...</p>}
+                {!loading && guideError && !guide && (
+                  <div>
+                    <p style={{ fontSize: 12, color: "#C1652B", marginBottom: 8 }}>{guideError}</p>
+                    <button onClick={() => openExerciseGuide(ex)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Retry</button>
+                  </div>
+                )}
+                {!loading && guide && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>How to perform</div>
+                      <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+                        {guide.steps.map((s, i) => <li key={i} style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.4 }}>{s}</li>)}
+                      </ol>
+                    </div>
+                    {guide.tips.length > 0 && (
+                      <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Form tips</div>
+                        <ul style={{ margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
+                          {guide.tips.map((t, i) => <li key={i} style={{ fontSize: 12, color: "#8A8578", lineHeight: 1.4 }}>{t}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Modals */}
         {addModalOpen && (

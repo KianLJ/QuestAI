@@ -13,6 +13,7 @@ const ChevronRight = (p) => <Sym ch="›" {...p} />;
 const ArrowRightLeft = (p) => <Sym ch="⇄" {...p} />;
 const Columns3 = (p) => <Sym ch="⊞" {...p} />;
 const Rows3 = (p) => <Sym ch="☰" {...p} />;
+const Info = (p) => <Sym ch="ⓘ" {...p} />;
 function Sparkles({ size = 16, color = "currentColor", style }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinejoin="round" style={style}><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" /><path d="M19 14l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z" /></svg>;
 }
@@ -126,4 +127,4 @@ function IconPalette({ size = 16, color = "currentColor" }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10a2 2 0 0 0 2-2 2 2 0 0 0-.5-1.3c-.4-.5-.4-1.2 0-1.7A2 2 0 0 1 15 16h2a5 5 0 0 0 5-5c0-4.4-4-8-10-8z" /><circle cx="8.5" cy="9.5" r="1.2" fill={color} stroke="none" /><circle cx="15.5" cy="9.5" r="1.2" fill={color} stroke="none" /><circle cx="8.5" cy="14.5" r="1.2" fill={color} stroke="none" /></svg>;
 }
 
-export { Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3, Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2, Timer, Loader2, Edit2, IconHome, IconCalendar, IconUser, IconUsers, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown, IconTitle, IconPalette };
+export { Sym, Plus, Check, X, Play, Pause, RotateCcw, ChevronLeft, ChevronRight, ArrowRightLeft, Columns3, Rows3, Info, Sparkles, Wand2, Repeat, Crown, Coins, FileText, Lock, Scissors, Target, Gear, Flame, Trophy, Sword, Trash2, Timer, Loader2, Edit2, IconHome, IconCalendar, IconUser, IconUsers, IconDumbbell, IconStopwatch, IconAxe, IconStaff, IconScythe, IconShield, IconStar, IconDragon, IconSkull, IconCrown, IconTitle, IconPalette };
