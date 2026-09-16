@@ -349,7 +349,7 @@ const SPLIT_LABELS = {
 };
 
 async function generateWorkoutPlan({ daysPerWeek, splitType, experience, goal }, availableExercises) {
-  const exerciseList = availableExercises.map((e) => ({ id: e.id, name: e.name, muscle: e.primaryMuscle, equipment: e.equipment }));
+  const exerciseList = availableExercises.slice(0, 120).map((e) => ({ id: e.id, name: e.name, muscle: e.primaryMuscle, equipment: e.equipment }));
 
   const clean = await callQuestAI(`INSTRUCTIONS: Output ONLY a JSON object, nothing else — no prose, no explanation, no markdown, no backticks, no commentary before or after.
 
@@ -365,7 +365,7 @@ Rules:
 - Assign exactly ${daysPerWeek} weekdays (keys from: mon,tue,wed,thu,fri,sat,sun) to plans in "schedule", spreading them out with rest days between when it makes sense for recovery. Omit rest days from "schedule" entirely — only include training days.
 
 OUTPUT FORMAT (nothing else):
-{"plans":[{"name":"Push Day","exercises":[{"exerciseId":"bb-bench-press","sets":4,"targetReps":"8-10","restSeconds":90}]}],"schedule":{"mon":"Push Day","thu":"Push Day"}}`, 45000, 3000);
+{"plans":[{"name":"Push Day","exercises":[{"exerciseId":"bb-bench-press","sets":4,"targetReps":"8-10","restSeconds":90}]}],"schedule":{"mon":"Push Day","thu":"Push Day"}}`, 60000, 8192);
 
   const parsed = JSON.parse(clean);
   if (!parsed || !Array.isArray(parsed.plans)) throw new Error("bad response");
@@ -1491,7 +1491,7 @@ function AppContent({ user }) {
     }
     generateWorkoutPlan({ daysPerWeek: aiDaysPerWeek, splitType: aiSplitType, experience: aiExperience, goal: aiGoal }, availableExercises)
       .then((result) => setAiPreview(result))
-      .catch(() => setAiError("Couldn't generate a plan right now. Try again in a moment."))
+      .catch((e) => { console.error("generateWorkoutPlan failed:", e); setAiError(e?.message ? `Couldn't generate a plan: ${e.message}` : "Couldn't generate a plan right now. Try again in a moment."); })
       .finally(() => setAiGenerating(false));
   }
 
