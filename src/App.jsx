@@ -297,17 +297,14 @@ const HABIT_TIER_DAYS = [3, 7, 21, 66];
 function nextHabitMilestone(streakDays) {
   return HABIT_TIER_DAYS.find((d) => d > streakDays) || null;
 }
-// Last 7 days as filled/empty dots, inferred from the current streak (which
-// is always contiguous by construction) rather than a stored history log.
-function habitStreakDots(habit, today) {
-  const rangeEnd = habit.lastCompletedDate === today ? today
-    : habit.lastCompletedDate === addDaysLocal(today, -1) ? addDaysLocal(today, -1)
-    : null;
-  const rangeStart = rangeEnd && habit.streak > 0 ? addDaysLocal(rangeEnd, -(habit.streak - 1)) : null;
+// This week (Monday-Sunday) as filled/empty dots, from the habit's own
+// completion log. Resets blank every Monday rather than rolling.
+function habitWeekDots(habit, today) {
+  const monday = getMondayISO(parseLocalDate(today));
   const days = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = addDaysLocal(today, -i);
-    days.push({ date: d, filled: !!(rangeStart && d >= rangeStart && d <= rangeEnd), isToday: d === today });
+  for (let i = 0; i < 7; i++) {
+    const d = addDaysLocal(monday, i);
+    days.push({ date: d, filled: (habit.completionLog || []).includes(d), isToday: d === today, isFuture: d > today });
   }
   return days;
 }
@@ -695,6 +692,7 @@ function AppContent({ user }) {
   const [crateModalOpen, setCrateModalOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [pickingSlot, setPickingSlot] = useState(null); // which slot is being picked
+  const [setDetailId, setSetDetailId] = useState(null); // which gear set's item list is open
   const collectionScrollRef = useRef(null);
   const [lastDrop, setLastDrop] = useState(null);
   const [devMode, setDevMode] = useState(false);
@@ -706,6 +704,7 @@ function AppContent({ user }) {
   const [habitPerfectDayDate, setHabitPerfectDayDate] = useState(null);
   const [newHabitName, setNewHabitName] = useState("");
   const [newHabitDeadline, setNewHabitDeadline] = useState("");
+  const [habitModalId, setHabitModalId] = useState(null); // null closed, "new" = add mode, else the habit id being edited
   const [habitBanner, setHabitBanner] = useState(null);
   const [perfectDayBanner, setPerfectDayBanner] = useState(false);
   const [habitXpPop, setHabitXpPop] = useState(null);
@@ -765,8 +764,6 @@ function AppContent({ user }) {
   const [shifts, setShifts] = useState([]);
   const [weekShiftModalOpen, setWeekShiftModalOpen] = useState(false); // [{ level, key, value }]
   const [statChoiceQueue, setStatChoiceQueue] = useState([]);
-  const [notifPermission, setNotifPermission] = useState("default");
-  const [swReg, setSwReg] = useState(null); // pending level-up choices
   const [streakBanner, setStreakBanner] = useState(null);
   const [bossBanner, setBossBanner] = useState(null);
   const [xpPop, setXpPop] = useState(null);
@@ -791,6 +788,8 @@ function AppContent({ user }) {
   const [splitError, setSplitError] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [notifPermission, setNotifPermission] = useState("default");
+  const [swReg, setSwReg] = useState(null);
   const [usernameInput, setUsernameInput] = useState(user?.displayName || "");
   const [usernameMsg, setUsernameMsg] = useState(null);
   const [usernameBusy, setUsernameBusy] = useState(false);
@@ -1041,10 +1040,6 @@ function AppContent({ user }) {
     })();
   }, []);
 
-  // ---- Sync notification permission state on load ----
-  useEffect(() => {
-    if ("Notification" in window) setNotifPermission(Notification.permission);
-  }, []);
 
   // ---- Recompute playerStats when level changes (handles de-levelling) ----
   useEffect(() => {
@@ -1060,7 +1055,10 @@ function AppContent({ user }) {
     setPlayerStats(newStats);
   }, [totalXP, loaded]);
 
-  // ---- Service Worker registration ----
+  // ---- Notifications: sync permission state, register the service worker ----
+  useEffect(() => {
+    if ("Notification" in window) setNotifPermission(Notification.permission);
+  }, []);
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker.register("/sw.js").then((reg) => {
@@ -1068,7 +1066,7 @@ function AppContent({ user }) {
     }).catch((e) => console.warn("SW registration failed:", e));
   }, [loaded]);
 
-  // ---- Schedule focus timer push when focus starts ----
+  // ---- Local notification: focus timer done / 5-min warning ----
   useEffect(() => {
     if (!swReg?.active || !focus?.running || !focus?.endsAt) return;
     const q = quests.find((x) => x.id === focus.questId);
@@ -1101,6 +1099,24 @@ function AppContent({ user }) {
       swReg.active?.postMessage({ type: "CANCEL_NOTIFICATION", id: "focus-timer-warning" });
     };
   }, [focus?.running, focus?.endsAt, swReg]);
+
+  // ---- Local notification: workout rest timer done ----
+  useEffect(() => {
+    const rt = workoutSession?.restTimer;
+    if (!swReg?.active || !rt?.running || !rt?.endsAt) return;
+    swReg.active.postMessage({
+      type: "SCHEDULE_NOTIFICATION",
+      id: "rest-timer",
+      title: "💪 Rest's over",
+      body: "Time for your next set.",
+      tag: "rest-timer",
+      url: "/",
+      fireAt: rt.endsAt,
+    });
+    return () => {
+      swReg.active?.postMessage({ type: "CANCEL_NOTIFICATION", id: "rest-timer" });
+    };
+  }, [workoutSession?.restTimer?.running, workoutSession?.restTimer?.endsAt, swReg]);
 
   // ---- Keep screen awake while the focus timer is enlarged on screen ----
   useEffect(() => {
@@ -1477,8 +1493,10 @@ function AppContent({ user }) {
     const perfectDayEarned = allDoneToday && habitPerfectDayDate !== today;
     let mainStreakChanged = false, newMainStreak = streak;
     if (lastActiveDate !== today) { newMainStreak = lastActiveDate === yesterday ? streak + 1 : 1; mainStreakChanged = true; }
-    const xpGain = HABIT_XP + milestoneBonus + (perfectDayEarned ? PERFECT_DAY_XP : 0);
-    const goldEarned = Math.max(1, Math.round(xpGain / 10));
+    const baseXP = HABIT_XP + milestoneBonus + (perfectDayEarned ? PERFECT_DAY_XP : 0);
+    const gearXP = Math.round(baseXP * activeStats.xpPct);
+    const xpGain = baseXP + gearXP;
+    const goldEarned = Math.max(1, Math.round(xpGain / 10) + activeStats.goldFlat);
     const prevLevel = levelFromXP(totalXP).level;
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
@@ -1514,6 +1532,21 @@ function AppContent({ user }) {
   function deleteHabit(id) { setHabits((hs) => hs.filter((h) => h.id !== id)); }
   function setHabitDeadline(id, deadlineTime) {
     setHabits((hs) => hs.map((h) => h.id === id ? { ...h, deadlineTime: deadlineTime || null } : h));
+  }
+  function renameHabit(id, name) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setHabits((hs) => hs.map((h) => h.id === id ? { ...h, name: trimmed } : h));
+  }
+
+  function openAddHabitModal() { setNewHabitName(""); setNewHabitDeadline(""); setHabitModalId("new"); }
+  function openEditHabitModal(h) { setNewHabitName(h.name); setNewHabitDeadline(h.deadlineTime || ""); setHabitModalId(h.id); }
+  function closeHabitModal() { setHabitModalId(null); }
+  function saveHabitModal() {
+    if (!newHabitName.trim()) return;
+    if (habitModalId === "new") addHabit(newHabitName, newHabitDeadline);
+    else { renameHabit(habitModalId, newHabitName); setHabitDeadline(habitModalId, newHabitDeadline); }
+    setHabitModalId(null);
   }
 
   // ---- Workout: plan CRUD ----
@@ -1592,12 +1625,13 @@ function AppContent({ user }) {
     setWorkoutSession((s) => s ? { ...s, restTimer: null } : s);
   }
   function logSet(exIdx, setIdx, weight, reps, restSeconds) {
+    const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * activeStats.xpPct);
     setWorkoutSession((s) => {
       if (!s) return s;
       const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
         ...e, sets: e.sets.map((st, j) => j !== setIdx ? st : { ...st, weight, reps, completed: true }),
       });
-      const nextSetsXp = (s.setsXp || 0) + WORKOUT_SET_XP;
+      const nextSetsXp = (s.setsXp || 0) + setXpGain;
       const restTimer = autoRestTimer ? { totalSeconds: restSeconds, secondsLeft: restSeconds, endsAt: Date.now() + restSeconds * 1000, running: true, exerciseIdx: exIdx, setIdx } : s.restTimer;
       if (weight !== "" && weight != null) {
         const exerciseId = s.exercises[exIdx].exerciseId;
@@ -1607,19 +1641,20 @@ function AppContent({ user }) {
       }
       return { ...s, exercises, setsXp: nextSetsXp, restTimer };
     });
-    setTotalXP((t) => t + WORKOUT_SET_XP);
-    setWorkoutXpPop({ key: `${exIdx}-${setIdx}-${Date.now()}`, xp: WORKOUT_SET_XP });
+    setTotalXP((t) => t + setXpGain);
+    setWorkoutXpPop({ key: `${exIdx}-${setIdx}-${Date.now()}`, xp: setXpGain });
     setTimeout(() => setWorkoutXpPop(null), 900);
   }
   function uncompleteSet(exIdx, setIdx) {
+    const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * activeStats.xpPct);
     setWorkoutSession((s) => {
       if (!s) return s;
       const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
         ...e, sets: e.sets.map((st, j) => j !== setIdx ? st : { ...st, completed: false }),
       });
-      return { ...s, exercises, setsXp: Math.max(0, (s.setsXp || 0) - WORKOUT_SET_XP) };
+      return { ...s, exercises, setsXp: Math.max(0, (s.setsXp || 0) - setXpGain) };
     });
-    setTotalXP((t) => Math.max(0, t - WORKOUT_SET_XP));
+    setTotalXP((t) => Math.max(0, t - setXpGain));
   }
   function finishWorkout() {
     if (!workoutSession) return;
@@ -1628,8 +1663,9 @@ function AppContent({ user }) {
     const durationSeconds = Math.max(1, Math.floor((Date.now() - workoutSession.startedAt) / 1000));
     const totalVolume = workoutSession.exercises.reduce((sum, e) => sum + e.sets.reduce((s2, st) => s2 + (st.completed ? (Number(st.weight) || 0) * (Number(st.reps) || 0) : 0), 0), 0);
     const prevLevel = levelFromXP(totalXP).level;
-    const xpGain = WORKOUT_COMPLETE_XP;
-    const goldEarned = Math.max(1, Math.round(xpGain / 10));
+    const gearXP = Math.round(WORKOUT_COMPLETE_XP * activeStats.xpPct);
+    const xpGain = WORKOUT_COMPLETE_XP + gearXP;
+    const goldEarned = Math.max(1, Math.round(xpGain / 10) + activeStats.goldFlat);
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
     setTotalXP(newTotal);
@@ -1908,9 +1944,11 @@ function AppContent({ user }) {
       // Step 2: Enemy death check
       setTimeout(() => {
         if (enemyHp <= 0) {
-          log.push(`💀 ${enemy.name} defeated! +${enemy.reward}g +${enemy.xpReward}XP`);
-          setGold((g) => g + enemy.reward);
-          setTotalXP((x) => x + enemy.xpReward);
+          const goldReward = enemy.reward + activeStats.goldFlat;
+          const xpReward = enemy.xpReward + Math.round(enemy.xpReward * activeStats.xpPct);
+          log.push(`💀 ${enemy.name} defeated! +${goldReward}g +${xpReward}XP`);
+          setGold((g) => g + goldReward);
+          setTotalXP((x) => x + xpReward);
           let pendingDrop = null;
           if (Math.random() < enemy.dropChance) {
             const weights = enemy.isBoss && enemy.difficulty === "epic"
@@ -2277,7 +2315,6 @@ function AppContent({ user }) {
           applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY),
         });
         await window.storage.set("pushSubscription", sub.toJSON());
-        console.log("Push subscription saved to Firestore");
       } catch (e) {
         console.warn("Push subscription failed:", e);
       }
@@ -2290,7 +2327,6 @@ function AppContent({ user }) {
     const rawData = atob(base64);
     return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
   }
-
 
   // ---- Shifts ----
   function addShifts(newShifts) {
@@ -2318,11 +2354,18 @@ function AppContent({ user }) {
 
   // ---- Render ----
   return (
-    <div className="safe-top" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84 }}>
+    <div className="safe-top" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84, "--accent-card-hover": accent + "40" }}>
       <style>{`
         * { box-sizing: border-box; }
-        .qlog-btn { transition: transform 0.12s ease; }
+        .qlog-btn { transition: transform 0.12s ease, filter 0.15s ease; }
         .qlog-btn:active { transform: scale(0.96); }
+        @media (hover: hover) {
+          .qlog-btn:hover { filter: brightness(1.12); }
+        }
+        .qlog-card { transition: box-shadow 0.15s ease; }
+        @media (hover: hover) {
+          .qlog-card:hover { box-shadow: 0 0 0 1px var(--accent-card-hover); }
+        }
         @keyframes floatUp { 0% { opacity:0; transform: translateY(6px) scale(0.9);} 20% { opacity:1; transform: translateY(-4px) scale(1.05);} 100% { opacity:0; transform: translateY(-32px) scale(1);} }
         @keyframes bannerIn { 0% { opacity:0; transform: translate(-50%,-20px) scale(0.9);} 15% { opacity:1; transform: translate(-50%,0) scale(1);} 85% { opacity:1; transform: translate(-50%,0) scale(1);} 100% { opacity:0; transform: translate(-50%,-10px) scale(0.95);} }
         .xp-pop { animation: floatUp 0.9s ease forwards; }
@@ -2574,7 +2617,7 @@ function AppContent({ user }) {
                   style={{ flex: 1, background: battleAnimating || blockCooldown > 0 ? "#2C3947" : "#232E3D", border: `1px solid ${blockCooldown > 0 ? "#33414F" : "#4FA3C9"}`, borderRadius: 10, padding: "13px 0", fontSize: 12, fontWeight: 700, color: battleAnimating || blockCooldown > 0 ? "#5C6773" : "#4FA3C9", cursor: battleAnimating || blockCooldown > 0 ? "default" : "pointer" }}>
                   {blockCooldown > 0 ? `🛡 (${blockCooldown})` : "🛡 Block"}
                 </button>
-                <button onClick={abandonBattle} className="qlog-btn"
+                <button onClick={abandonBattle} className="qlog-btn qlog-card"
                   style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "13px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Flee</button>
               </div>
             )}
@@ -2658,7 +2701,7 @@ function AppContent({ user }) {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {workoutSession.exercises.map((ex, exIdx) => (
-              <div key={exIdx} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "10px 12px" }}>
+             <div key={exIdx} className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
                   <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
@@ -2693,6 +2736,25 @@ function AppContent({ user }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button onClick={() => { discardWorkout(); setDiscardConfirmOpen(false); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>Discard workout</button>
               <button onClick={() => setDiscardConfirmOpen(false)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {habitModalId && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={closeHabitModal}>
+          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>{habitModalId === "new" ? "Add Habit" : "Edit Habit"}</h3>
+            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Name</label>
+            <input autoFocus value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveHabitModal(); if (e.key === "Escape") closeHabitModal(); }} placeholder="e.g. drink water" style={{ width: "100%", marginBottom: 14, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
+            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Due time (optional)</label>
+            <input type="time" value={newHabitDeadline} onChange={(e) => setNewHabitDeadline(e.target.value)} style={{ width: "100%", marginBottom: 18, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, colorScheme: "dark" }} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={saveHabitModal} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>{habitModalId === "new" ? "Add Habit" : "Save Changes"}</button>
+              {habitModalId !== "new" && (
+                <button onClick={() => { deleteHabit(habitModalId); closeHabitModal(); }} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A2E44", cursor: "pointer" }}>Delete Habit</button>
+              )}
+              <button onClick={closeHabitModal} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -2768,7 +2830,7 @@ function AppContent({ user }) {
         {/* XP / Streak (Home tab) */}
         {activeTab === "home" && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-          <div style={{ flex: "1 1 100%", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+          <div className="qlog-card" style={{ flex: "1 1 100%", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span onClick={() => {
@@ -2832,7 +2894,7 @@ function AppContent({ user }) {
         {activeTab === "home" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
             {/* Today at a glance */}
-            <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+            <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Today at a glance</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setActiveTab("quests")} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
@@ -2852,8 +2914,9 @@ function AppContent({ user }) {
               </div>
             </div>
 
-            {/* This week */}
-            <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+            {/* This week + Workout summary — paired side by side when there's room */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>This week</div>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                 <div>
@@ -2882,7 +2945,7 @@ function AppContent({ user }) {
               const sessionsThisWeek = workoutHistory.filter((h) => h.date >= weekStart).length;
               const lastSession = workoutHistory[0];
               return (
-                <div onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+                <div onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Workout summary</span>
                     <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: overall.info.color, background: overall.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>
@@ -2935,9 +2998,10 @@ function AppContent({ user }) {
                 </div>
               );
             })()}
+            </div>
 
             {/* Equipped gear preview */}
-            <button onClick={() => setActiveTab("gear")} className="qlog-btn" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
+            <button onClick={() => setActiveTab("gear")} className="qlog-btn qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</span>
                 <span style={{ fontSize: 10, color: "#5C6773" }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
@@ -2958,7 +3022,7 @@ function AppContent({ user }) {
 
             {/* Recent activity */}
             {recentCompleted.length > 0 && (
-              <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent activity</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {recentCompleted.map((q) => (
@@ -3045,7 +3109,7 @@ function AppContent({ user }) {
         </div>
 
         {questFilterOpen && (
-          <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+         <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
             <input value={questSearch} onChange={(e) => setQuestSearch(e.target.value)} placeholder="Search quest titles..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {themedDifficulties.map((d) => {
@@ -3066,7 +3130,7 @@ function AppContent({ user }) {
 
         {/* ---- Calendar views ---- */}
         {calView === "day" && (
-          <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
+         <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ padding: "10px 12px", borderBottom: "1px solid #2C3947", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: calAnchor === today ? accent : "#EDE4D3" }}>
                 {parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
@@ -3092,7 +3156,7 @@ function AppContent({ user }) {
         )}
 
         {calView === "week" && (
-          <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
+         <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ overflowX: "auto" }}>
               <div style={{ display: "flex", borderBottom: "1px solid #2C3947", minWidth: 490 }}>
                 {getWeekDates(calAnchor).map((date) => {
@@ -3148,7 +3212,7 @@ function AppContent({ user }) {
           const monthDates = getMonthDates(calAnchor);
           const anchorMonth = parseLocalDate(calAnchor).getMonth();
           return (
-            <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
+           <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid #2C3947" }}>
                 {["M","T","W","T","F","S","S"].map((d, i) => (
                   <div key={i} style={{ padding: "6px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: "#8A8578", borderRight: i < 6 ? "1px solid #2C3947" : "none" }}>{d}</div>
@@ -3227,10 +3291,12 @@ function AppContent({ user }) {
           const perfectDayEarnedToday = habitPerfectDayDate === today;
           const bestHabit = habits.reduce((best, h) => (h.streak > (best?.streak || 0) ? h : best), null);
           const totalCompletions = habits.reduce((sum, h) => sum + (h.totalCompletions || 0), 0);
-          const last30Days = Array.from({ length: 30 }, (_, i) => {
-            const d = addDaysLocal(today, -(29 - i));
+          const todayDate = parseLocalDate(today);
+          const daysInMonth = new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, 0).getDate();
+          const thisMonthDays = Array.from({ length: daysInMonth }, (_, i) => {
+            const d = localDateStr(new Date(todayDate.getFullYear(), todayDate.getMonth(), i + 1));
             const done = habits.filter((h) => (h.completionLog || []).includes(d)).length;
-            return { date: d, done, ratio: habits.length ? done / habits.length : 0 };
+            return { date: d, done, ratio: habits.length ? done / habits.length : 0, isFuture: d > today };
           });
           const tiers = [
             { label: "Bronze", days: 3, color: "#C1652B" },
@@ -3242,62 +3308,59 @@ function AppContent({ user }) {
           <div style={{ marginBottom: 20 }}>
 
           {/* Daily Habits */}
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>Daily Habits</span>
               <span style={{ fontSize: 9, color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 4, marginBottom: 8 }}>
-              {habits.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>No habits yet — add one below.</p>}
+              {habits.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>No habits yet — tap + to add one.</p>}
               {habits.map((h) => {
                 const doneToday = h.lastCompletedDate === today;
                 const tier = habitTier(h.streak);
                 const isLate = !!h.deadlineTime && !doneToday && nowHHMM() > h.deadlineTime;
-                const dots = habitStreakDots(h, today);
+                const dots = habitWeekDots(h, today);
                 return (
-                  <div key={h.id} style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: "4px 8px" }}>
+                  <div key={h.id} onClick={() => openEditHabitModal(h)} className="qlog-btn qlog-card" style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {!doneToday
-                        ? <button onClick={() => completeHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
-                        : <button onClick={() => uncompleteHabit(h.id)} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
+                        ? <button onClick={(e) => { e.stopPropagation(); completeHabit(h.id); }} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
+                        : <button onClick={(e) => { e.stopPropagation(); uncompleteHabit(h.id); }} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
                       }
                       <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
                       {isLate && <span style={{ fontSize: 9, fontWeight: 700, color: "#D9536A" }}>LATE</span>}
-                      <label title={h.deadlineTime ? `Due by ${formatDeadline(h.deadlineTime)}` : "Set a due time"} style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }}>
-                        <Timer size={10} color={isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563"} />
-                        <input
-                          type="time"
-                          value={h.deadlineTime || ""}
-                          onChange={(e) => setHabitDeadline(h.id, e.target.value)}
-                          style={{ width: 62, background: "transparent", border: "none", color: isLate ? "#D9536A" : h.deadlineTime ? "#8A8578" : "#4A5563", fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", colorScheme: "dark" }}
-                        />
-                      </label>
+                      {h.deadlineTime && (
+                        <span title={`Due by ${formatDeadline(h.deadlineTime)}`} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: isLate ? "#D9536A" : "#8A8578" }}>
+                          <Timer size={10} color={isLate ? "#D9536A" : "#8A8578"} /> {formatDeadline(h.deadlineTime)}
+                        </span>
+                      )}
                       {h.streak > 0 && (
                         <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
                           <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
                         </span>
                       )}
-                      <button onClick={() => deleteHabit(h.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={11} /></button>
                       {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 30, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
                     </div>
                     <div style={{ display: "flex", gap: 3, paddingLeft: 21 }}>
-                      {dots.map((d) => (
-                        <div key={d.date} title={d.date} style={{ width: 12, height: 12, borderRadius: 3, background: d.filled ? tier.color || accent : "transparent", border: `1.5px solid ${d.filled ? (tier.color || accent) : d.isToday ? "#5C6773" : "#2C3947"}` }} />
+                      {dots.map((d, i) => (
+                        <div key={d.date} title={`${DAYS[i].label} — ${d.date}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                          <span style={{ fontSize: 7, fontWeight: 700, color: d.isToday ? (tier.color || accent) : "#4A5563" }}>{DAYS[i].label[0]}</span>
+                          <div style={{ width: 12, height: 12, borderRadius: 3, opacity: d.isFuture ? 0.5 : 1, background: d.filled ? tier.color || accent : "transparent", border: d.filled ? `1.5px solid ${tier.color || accent}` : d.isFuture ? "1.5px dashed #2C3947" : d.isToday ? "1.5px solid #5C6773" : "1.5px solid #2C3947" }} />
+                        </div>
                       ))}
                     </div>
                   </div>
                 );
               })}
-            </div>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addHabit(newHabitName, newHabitDeadline)} placeholder="Add a habit — e.g. drink water" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", fontSize: 12 }} />
-              <input type="time" value={newHabitDeadline} onChange={(e) => setNewHabitDeadline(e.target.value)} title="Optional due time" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "5px 6px", color: "#EDE4D3", fontSize: 11, colorScheme: "dark" }} />
-              <button onClick={() => addHabit(newHabitName, newHabitDeadline)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 8px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={13} color="#1B2430" /></button>
+              <button onClick={openAddHabitModal} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "none", border: "1.5px dashed #33414F", borderRadius: 6, padding: "4px 8px", minHeight: 38, color: "#5C6773", cursor: "pointer" }}>
+                <Plus size={14} color="#5C6773" /> <span style={{ fontSize: 12, fontWeight: 600 }}>Add habit</span>
+              </button>
             </div>
           </div>
 
-          {/* Today's progress */}
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+          {/* Today's progress + Streaks — paired side by side when there's room */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 10 }}>
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Today's Progress</span>
               <span style={{ fontSize: 12, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{doneCount}/{habits.length}</span>
@@ -3312,31 +3375,8 @@ function AppContent({ user }) {
             ) : null}
           </div>
 
-          {/* 30-day consistency heatmap */}
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Last 30 Days</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <span style={{ fontSize: 8, color: "#5C6773" }}>Less</span>
-                {[0.001, 0.34, 0.67, 1].map((r) => (
-                  <div key={r} style={{ width: 6, height: 6, borderRadius: 2, background: r === 0.001 ? "#141C27" : accent, opacity: r === 0.001 ? 1 : Math.max(0.25, r) }} />
-                ))}
-                <span style={{ fontSize: 8, color: "#5C6773" }}>More</span>
-              </div>
-            </div>
-            {habits.length === 0 ? (
-              <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Add a habit to start tracking consistency.</p>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                {last30Days.map((d) => (
-                  <div key={d.date} title={`${d.date}: ${d.done}/${habits.length} habits`} style={{ width: 10, height: 10, borderRadius: 2, background: d.ratio > 0 ? accent : "#141C27", opacity: d.ratio > 0 ? Math.max(0.3, d.ratio) : 1, border: d.date === today ? `1px solid ${accent}` : "1px solid transparent" }} />
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* Streak stats + tier legend */}
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Streaks</div>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
               <div>
@@ -3354,10 +3394,41 @@ function AppContent({ user }) {
               ))}
             </div>
           </div>
+          </div>
+
+          {/* 30-day consistency heatmap */}
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>This Month</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                <span style={{ fontSize: 8, color: "#5C6773" }}>Less</span>
+                {[0.001, 0.34, 0.67, 1].map((r) => (
+                  <div key={r} style={{ width: 6, height: 6, borderRadius: 2, background: r === 0.001 ? "#141C27" : accent, opacity: r === 0.001 ? 1 : Math.max(0.25, r) }} />
+                ))}
+                <span style={{ fontSize: 8, color: "#5C6773" }}>More</span>
+              </div>
+            </div>
+            {habits.length === 0 ? (
+              <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Add a habit to start tracking consistency.</p>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: `repeat(${thisMonthDays.length}, 1fr)`, gap: 3 }}>
+                {thisMonthDays.map((d, i) => {
+                  const dayNum = i + 1;
+                  const showLabel = dayNum === 1 || dayNum === thisMonthDays.length || dayNum % 5 === 0;
+                  return (
+                    <div key={d.date} title={`${d.date}: ${d.done}/${habits.length} habits`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
+                      <span style={{ fontSize: 7, fontWeight: 700, color: d.date === today ? accent : "#4A5563", visibility: showLabel ? "visible" : "hidden", whiteSpace: "nowrap", lineHeight: 1 }}>{dayNum}</span>
+                      <div style={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 2, opacity: d.isFuture ? 0.35 : d.ratio > 0 ? Math.max(0.3, d.ratio) : 1, background: !d.isFuture && d.ratio > 0 ? accent : "#141C27", border: d.date === today ? `1px solid ${accent}` : d.isFuture ? "1px dashed #2C3947" : "1px solid transparent" }} />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           {/* Next milestones */}
           {habits.some((h) => h.streak > 0 && nextHabitMilestone(h.streak)) && (
-            <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
+           <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Next Milestones</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {habits
@@ -3452,14 +3523,14 @@ function AppContent({ user }) {
                     </div>
                   )}
                   {!todayPlan && (
-                    <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "24px 14px", textAlign: "center" }}>
+                    <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "24px 14px", textAlign: "center" }}>
                       <IconDumbbell size={26} color="#5C6773" style={{ marginBottom: 8 }} />
                       <p style={{ fontSize: 13, color: "#8A8578", margin: 0 }}>No workout scheduled for today.</p>
                       <button onClick={() => setActiveWorkoutTab("schedule")} className="qlog-btn" style={{ marginTop: 10, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 14px", fontSize: 12, color: accent, cursor: "pointer" }}>Set up split</button>
                     </div>
                   )}
                   {todayPlan && (
-                    <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                    <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 700 }}>{todayPlan.name}</span>
                         <span style={{ fontSize: 10, color: "#5C6773" }}>{todayPlan.exercises.length} exercises</span>
@@ -3503,7 +3574,7 @@ function AppContent({ user }) {
                   const isEditing = editingPlanId === plan.id;
                   const muscleVolume = summarizeMuscleVolume(plan.exercises, customExercises);
                   return (
-                    <div key={plan.id} style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "10px 14px" }}>
+                    <div key={plan.id} className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "10px 14px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <button onClick={() => setEditingPlanId(isEditing ? null : plan.id)} className="qlog-btn" style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", flex: 1, padding: 0 }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{plan.name}</span>
@@ -3521,7 +3592,7 @@ function AppContent({ user }) {
                           {plan.exercises.map((pe) => {
                             const ex = findExercise(pe.exerciseId, customExercises);
                             return (
-                              <div key={pe.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
+                             <div key={pe.id} className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                                   <span style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex?.name || "?"} <InfoButton accent={accent} size={11} onClick={() => openExerciseGuide(ex)} /></span>
                                   <button onClick={() => removePlanExercise(plan.id, pe.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><X size={12} /></button>
@@ -3549,7 +3620,7 @@ function AppContent({ user }) {
             )}
 
             {activeWorkoutTab === "schedule" && (
-              <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+              <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                 <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 10px" }}>Assign a plan to each weekday — it repeats every week.</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {DAYS.map((d) => (
@@ -3595,7 +3666,7 @@ function AppContent({ user }) {
                     </div>
                     {points.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No history for this exercise yet.</p>}
                     {points.length > 0 && (
-                      <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 10px 6px", marginBottom: 10 }}>
+                     <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 10px 6px", marginBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
                           <span style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Weight progress</span>
                           <span style={{ fontSize: 11, color: accent, fontWeight: 700 }}>PR {prWeight}{points[points.length - 1]?.weight === prWeight ? " 🔥" : ""}</span>
@@ -3644,7 +3715,7 @@ function AppContent({ user }) {
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sessions</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {workoutHistory.map((h) => (
-                        <div key={h.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
+                       <div key={h.id} className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
                           <div onClick={() => setExpandedHistoryId(expandedHistoryId === h.id ? null : h.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                             <div>
                               <div style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3" }}>{h.planName}</div>
@@ -3674,7 +3745,7 @@ function AppContent({ user }) {
             {activeWorkoutTab === "generate" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 {!aiPreview && (
-                  <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+                 <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipment you have</div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3746,7 +3817,7 @@ function AppContent({ user }) {
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {aiPreview.plans.map((p, i) => (
-                        <div key={i} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
+                       <div key={i} className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
                           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{p.name}</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             {p.exercises.map((ex, j) => {
@@ -3763,7 +3834,7 @@ function AppContent({ user }) {
                       ))}
                     </div>
 
-                    <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
+                   <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Weekly Schedule</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                         {DAYS.map((d) => (
@@ -3920,7 +3991,7 @@ function AppContent({ user }) {
         {/* Gear */}
         {activeTab === "gear" && (
           <div style={{ marginBottom: 20 }}>
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700 }}>⚔ Gear</span>
               <span style={{ fontSize: 9, color: "#5C6773", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
@@ -3961,7 +4032,7 @@ function AppContent({ user }) {
           </div>
 
           {/* Collection by rarity */}
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Collection by Rarity</div>
             {RARITY_ORDER.map((r) => {
               const total = ITEM_CATALOGUE.filter((i) => i.rarity === r).length;
@@ -3980,12 +4051,12 @@ function AppContent({ user }) {
           </div>
 
           {/* Set bonuses */}
-          <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
+         <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Set Bonuses</span>
               <span style={{ fontSize: 9, color: "#5C6773" }}>{activeStats.activeSets.length} active</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 6 }}>
               {SETS.map((set) => {
                 const equippedCount = set.items.filter((id) => Object.values(equipped).includes(id)).length;
                 const isActive = activeStats.activeSets.some((s) => s.id === set.id);
@@ -3993,13 +4064,11 @@ function AppContent({ user }) {
               })
                 .sort((a, b) => (b.isActive - a.isActive) || (b.equippedCount / b.set.requiredCount - a.equippedCount / a.set.requiredCount))
                 .map(({ set, equippedCount, isActive }) => (
-                  <div key={set.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: isActive ? set.color + "18" : "#1F2836", border: `1px solid ${isActive ? set.color : "#2C3947"}`, borderRadius: 8, padding: "7px 10px" }}>
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? set.color : "#8A8578" }}>{set.label}</div>
-                      <div style={{ fontSize: 9, color: "#5C6773" }}>{set.desc}</div>
-                    </div>
-                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: isActive ? set.color : "#5C6773", flexShrink: 0 }}>{equippedCount}/{set.requiredCount} equipped</span>
-                  </div>
+                  <button key={set.id} onClick={() => setSetDetailId(set.id)} className="qlog-btn" style={{ display: "flex", flexDirection: "column", gap: 4, background: isActive ? set.color + "18" : "#1F2836", border: `1px solid ${isActive ? set.color : "#2C3947"}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", textAlign: "left" }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? set.color : "#8A8578" }}>{set.label}</div>
+                    <div style={{ fontSize: 9, color: "#5C6773" }}>{set.desc}</div>
+                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: isActive ? set.color : "#5C6773" }}>{equippedCount}/{set.requiredCount} equipped</span>
+                  </button>
                 ))}
             </div>
           </div>
@@ -4010,7 +4079,7 @@ function AppContent({ user }) {
         {activeTab === "friends" && (
           <div style={{ marginBottom: 20 }}>
             {!myUsername ? (
-              <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "20px 14px", textAlign: "center" }}>
+              <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "20px 14px", textAlign: "center" }}>
                 <IconUsers size={26} color="#5C6773" style={{ marginBottom: 8 }} />
                 <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 12px" }}>Set a username to add friends and let them find you.</p>
                 <div style={{ display: "flex", gap: 6, maxWidth: 280, margin: "0 auto" }}>
@@ -4029,7 +4098,7 @@ function AppContent({ user }) {
                 <div>
                   <button onClick={() => setSelectedFriendUid(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 12, padding: 0 }}><ChevronLeft size={14} /> All friends</button>
 
-                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                  <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <span style={{ fontSize: 15, fontWeight: 700 }}>{friend.username}</span>
                       <button onClick={() => handleRemoveFriend(selectedFriendUid)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "4px 10px", fontSize: 10, color: "#8A2E44", cursor: "pointer" }}>Remove Friend</button>
@@ -4044,7 +4113,17 @@ function AppContent({ user }) {
                     </div>
                   </div>
 
-                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                  {/* Overall Rank + Equipped — paired side by side when there's room */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 10 }}>
+                  <div style={{ background: `linear-gradient(135deg, ${friendOverall.info.color}22, #1F2836)`, border: `1px solid ${friendOverall.info.color}66`, borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 17, fontWeight: 700, color: friendOverall.info.color, fontFamily: "Georgia, serif" }}>{friendOverall.info.label}</span>
+                      {friendOverall.info.unranked ? <IconShield size={18} color={friendOverall.info.color} /> : <Trophy size={18} color={friendOverall.info.color} />}
+                    </div>
+                  </div>
+
+                  <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</div>
                     <div style={{ display: "flex", gap: 8 }}>
                       {GEAR_SLOTS.map((slot) => {
@@ -4060,13 +4139,6 @@ function AppContent({ user }) {
                       })}
                     </div>
                   </div>
-
-                  <div style={{ background: `linear-gradient(135deg, ${friendOverall.info.color}22, #1F2836)`, border: `1px solid ${friendOverall.info.color}66`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 17, fontWeight: 700, color: friendOverall.info.color, fontFamily: "Georgia, serif" }}>{friendOverall.info.label}</span>
-                      {friendOverall.info.unranked ? <IconShield size={18} color={friendOverall.info.color} /> : <Trophy size={18} color={friendOverall.info.color} />}
-                    </div>
                   </div>
 
                   {friendRankRows.length === 0 && (
@@ -4074,7 +4146,7 @@ function AppContent({ user }) {
                   )}
 
                   {friendRankRows.length > 0 && (
-                    <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                    <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Exercise Ranks</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {friendRankRows.map((r) => (
@@ -4088,7 +4160,7 @@ function AppContent({ user }) {
                     </div>
                   )}
 
-                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+                  <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Routines</div>
                     {(friend.workoutPlans || []).length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No workout plans yet.</p>}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -4101,7 +4173,7 @@ function AppContent({ user }) {
                     </div>
                   </div>
 
-                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                  <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                     <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent Workouts</div>
                     {(friend.workoutHistory || []).length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No workouts logged yet.</p>}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -4134,24 +4206,37 @@ function AppContent({ user }) {
                 </div>
 
                 {activeFriendsTab === "friends" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {friendsLoading && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center" }}>Loading...</p>}
-                    {!friendsLoading && friendIds.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center" }}>No friends yet — add one in the Add tab.</p>}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 190px))", gap: 8 }}>
+                    {friendsLoading && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center", gridColumn: "1 / -1" }}>Loading...</p>}
+                    {!friendsLoading && friendIds.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center", gridColumn: "1 / -1" }}>No friends yet — add one in the Add tab.</p>}
                     {friendIds.map((uid) => {
                       const friend = friendsData[uid];
                       if (!friend) return null;
                       const friendLevel = levelFromXP(friend.totalXP || 0);
                       const friendOverall = computeOverallRank(computeExerciseRankRows(friend.workoutHistory || [], customExercises)) || { info: rankInfo(-1) };
                       return (
-                        <button key={uid} onClick={() => setSelectedFriendUid(uid)} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{friend.username}</span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button key={uid} onClick={() => setSelectedFriendUid(uid)} className="qlog-btn qlog-card" style={{ display: "flex", flexDirection: "column", gap: 7, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{friend.username}</span>
+                            <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace", flexShrink: 0 }}>Lv {friendLevel.level}</span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: friendOverall.info.color, background: friendOverall.info.color + "22", borderRadius: 10, padding: "2px 7px" }}>
                               {friendOverall.info.unranked ? <IconShield size={10} color={friendOverall.info.color} /> : <Trophy size={10} color={friendOverall.info.color} />}
                               {friendOverall.info.label}
                             </span>
-                            <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>Lv {friendLevel.level}</span>
                             <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: friend.streak > 0 ? "#C1652B" : "#5C6773" }}><Flame size={11} color={friend.streak > 0 ? "#C1652B" : "#5C6773"} /> {friend.streak || 0}d</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 4 }}>
+                            {GEAR_SLOTS.map((slot) => {
+                              const item = friend.equipped?.[slot] ? ITEM_CATALOGUE.find((i) => i.id === friend.equipped[slot]) : null;
+                              const rar = item ? RARITIES[item.rarity] : null;
+                              return (
+                                <div key={slot} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", height: 20, background: item ? rar.glow : "#141C27", border: `1px solid ${item ? rar.color : "#2C3947"}`, borderRadius: 6 }}>
+                                  {item ? item.icon(rar.color) : null}
+                                </div>
+                              );
+                            })}
                           </div>
                         </button>
                       );
@@ -4192,7 +4277,7 @@ function AppContent({ user }) {
                 )}
 
                 {activeFriendsTab === "add" && (
-                  <div style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+                  <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                     <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 10px" }}>Enter a friend's username to send them a request.</p>
                     <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                       <input value={friendSearchInput} onChange={(e) => { setFriendSearchInput(e.target.value); setFriendSearchMsg(null); }} onKeyDown={(e) => e.key === "Enter" && handleSendFriendRequest()} placeholder="username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
@@ -4239,7 +4324,7 @@ function AppContent({ user }) {
                   ))}
               </div>
               {customExerciseForm ? (
-                <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+               <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
                   <input value={customExerciseForm.name} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, name: e.target.value }))} placeholder="Exercise name" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
                   <div style={{ display: "flex", gap: 6 }}>
                     <select value={customExerciseForm.primaryMuscle || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, primaryMuscle: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
@@ -4286,7 +4371,7 @@ function AppContent({ user }) {
                       </ol>
                     </div>
                     {guide.tips.length > 0 && (
-                      <div style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10 }}>
+                     <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Form tips</div>
                         <ul style={{ margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
                           {guide.tips.map((t, i) => <li key={i} style={{ fontSize: 12, color: "#8A8578", lineHeight: 1.4 }}>{t}</li>)}
@@ -4492,9 +4577,17 @@ function AppContent({ user }) {
 
               {"Notification" in window && (
                 <SettingsSection title="REMINDERS">
-                  <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 10px" }}>
-                    {notifPermission === "granted" ? "Reminders are enabled. You'll get nudges for habits, overdue tasks and your weekly battle." : "Get reminded about habits, overdue tasks and your weekly battle."}
+                  <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 6px" }}>
+                    {notifPermission === "granted" ? "Reminders are enabled." : "Get nudged so nothing slips."}
                   </p>
+                  <ul style={{ margin: "0 0 10px", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>
+                    <li style={{ fontSize: 11, color: "#8A8578" }}>Habits due soon or still open at day's end</li>
+                    <li style={{ fontSize: 11, color: "#8A8578" }}>Quests due today, still incomplete</li>
+                    <li style={{ fontSize: 11, color: "#8A8578" }}>Today's scheduled workout, not yet logged</li>
+                    <li style={{ fontSize: 11, color: "#8A8578" }}>Weekly boss battle ready (Mondays)</li>
+                    <li style={{ fontSize: 11, color: "#8A8578" }}>Friend requests, and when they're accepted</li>
+                    <li style={{ fontSize: 11, color: "#8A8578" }}>Rest timer and focus timer, while active</li>
+                  </ul>
                   {notifPermission === "denied" && (
                     <p style={{ fontSize: 11, color: "#8A2E44", margin: "0 0 10px" }}>Notifications are blocked in your browser settings. Enable them there first, then come back here.</p>
                   )}
@@ -4597,6 +4690,49 @@ function AppContent({ user }) {
             </div>
           </div>
         )}
+
+        {/* Set item list modal */}
+        {setDetailId && (() => {
+          const set = SETS.find((s) => s.id === setDetailId);
+          if (!set) return null;
+          const isActive = activeStats.activeSets.some((s) => s.id === set.id);
+          return (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setSetDetailId(null)}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 380, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
+                <button onClick={() => setSetDetailId(null)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
+                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", color: set.color }}>{set.label}</h3>
+                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#8A8578" }}>{set.desc} — needs {set.requiredCount} of {set.items.length} items equipped</p>
+                {isActive && <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, color: set.color }}>✓ Bonus active</p>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+                  {set.items.map((id) => {
+                    const item = ITEM_CATALOGUE.find((i) => i.id === id);
+                    if (!item) return null;
+                    const owned = inventory.includes(id);
+                    const isEquipped = Object.values(equipped).includes(id);
+                    const rar = owned ? RARITIES[item.rarity] : null;
+                    return (
+                      <div key={id} style={{ display: "flex", alignItems: "center", gap: 10, background: owned ? (rar?.glow || "#1F2836") : "#1F2836", border: `1px solid ${owned ? (isEquipped ? set.color : rar?.color) : "#2C3947"}`, borderRadius: 8, padding: "8px 10px" }}>
+                        <div style={{ width: 24, height: 24, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {owned ? item.icon(rar.color) : <Lock size={13} color="#5C6773" />}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {owned ? (
+                            <>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3" }}>{item.label}</div>
+                              <div style={{ fontSize: 9, color: rar.color, fontWeight: 700, textTransform: "capitalize" }}>{item.rarity}{isEquipped ? " · equipped" : ""}</div>
+                            </>
+                          ) : (
+                            <div style={{ fontSize: 12, color: "#5C6773" }}>Unidentified {SLOT_LABELS[item.slot]}</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Collection / Gear Modal */}
         {collectionOpen && pickingSlot && (

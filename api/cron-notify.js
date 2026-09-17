@@ -7,6 +7,7 @@ webpush.setVapidDetails(
 );
 
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID;
+const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 async function getAccessToken() {
   const { createSign } = await import("crypto");
@@ -32,13 +33,6 @@ async function getAccessToken() {
   });
   const data = await resp.json();
   return data.access_token;
-}
-
-async function firestoreGet(token, docPath) {
-  const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/${docPath}`;
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!resp.ok) throw new Error(`Firestore GET failed: ${resp.status} ${await resp.text()}`);
-  return resp.json();
 }
 
 // Lists every per-user doc in the "storage" collection (one per signed-up
@@ -77,42 +71,53 @@ function extractAppData(doc) {
   catch { return null; }
 }
 
+function formatDeadline(hhmm) {
+  const [h, m] = hhmm.split(":").map(Number);
+  const period = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function buildNotifications(appData, { today, isMidday, isEvening, isMonday }) {
-  const quests        = appData.quests || [];
-  const habits        = appData.habits || [];
-  const pendingBattle = appData.pendingBattle;
-  const battleState   = appData.battleState;
+function buildNotifications(appData, { today, isMidday, isEvening, isMonday, dayKey }) {
+  const quests          = appData.quests || [];
+  const habits          = appData.habits || [];
+  const pendingBattle    = appData.pendingBattle;
+  const battleState      = appData.battleState;
+  const workoutSchedule  = appData.workoutSchedule || {};
+  const workoutPlans     = appData.workoutPlans || [];
+  const workoutHistory   = appData.workoutHistory || [];
 
   const notifications = [];
 
-  // ---- Habit reminder — midday and evening every day ----
   const incompleteHabits = habits.filter((h) => h.lastCompletedDate !== today);
+
+  // ---- Habits — midday nudge names anything due soon, evening is a last call ----
   if (incompleteHabits.length > 0) {
     if (isMidday) {
-      notifications.push({
-        title: "🌿 Habit check-in",
-        body: incompleteHabits.length === 1
-          ? `Don't forget: "${incompleteHabits[0].name}" today.`
-          : `${incompleteHabits.length} habits to complete today. You've got time!`,
-        tag: "habit-midday",
-      });
+      const withDeadlines = incompleteHabits.filter((h) => h.deadlineTime);
+      const body = withDeadlines.length > 0
+        ? withDeadlines.slice(0, 3).map((h) => `${h.name} (${formatDeadline(h.deadlineTime)})`).join(", ") + (incompleteHabits.length > withDeadlines.length ? ` +${incompleteHabits.length - withDeadlines.length} more` : "")
+        : incompleteHabits.length === 1
+          ? `"${incompleteHabits[0].name}" today.`
+          : `${incompleteHabits.length} habits to complete today.`;
+      notifications.push({ title: "🌿 Habit check-in", body, tag: "habit-midday" });
     }
     if (isEvening) {
       notifications.push({
         title: "🌿 Habits still pending",
         body: incompleteHabits.length === 1
-          ? `"${incompleteHabits[0].name}" — don't end the day without it.`
-          : `${incompleteHabits.length} habits still incomplete. Last chance today!`,
+          ? `"${incompleteHabits[0].name}" — don't lose your streak.`
+          : `${incompleteHabits.length} habits still incomplete: ${incompleteHabits.slice(0, 3).map((h) => h.name).join(", ")}${incompleteHabits.length > 3 ? "…" : ""}`,
         tag: "habit-evening",
       });
     }
   }
 
-  // ---- Overdue tasks — evening only ----
+  // ---- Overdue quests — evening only ----
   if (isEvening) {
     const overdueToday = quests.filter((q) => !q.completed && q.date === today);
     if (overdueToday.length > 0) {
@@ -126,6 +131,20 @@ function buildNotifications(appData, { today, isMidday, isEvening, isMonday }) {
     }
   }
 
+  // ---- Scheduled workout today, not yet logged — midday only ----
+  if (isMidday) {
+    const planId = workoutSchedule[dayKey];
+    const plan = planId ? workoutPlans.find((p) => p.id === planId) : null;
+    const alreadyDone = workoutHistory.some((h) => h.date === today);
+    if (plan && !alreadyDone) {
+      notifications.push({
+        title: "💪 Workout day",
+        body: `"${plan.name}" is on today's schedule — get it in when you're ready.`,
+        tag: "workout-scheduled",
+      });
+    }
+  }
+
   // ---- Weekly battle — Monday midday only ----
   if (isMidday && isMonday && pendingBattle?.length > 0 && !battleState) {
     notifications.push({
@@ -135,7 +154,7 @@ function buildNotifications(appData, { today, isMidday, isEvening, isMonday }) {
     });
   }
 
-  return { notifications, incompleteHabitsCount: incompleteHabits.length, overdueQuestsCount: quests.filter((q) => !q.completed && q.date === today).length };
+  return notifications;
 }
 
 export default async function handler(req, res) {
@@ -151,6 +170,7 @@ export default async function handler(req, res) {
   const isMidday  = force || utcHour === 11;
   const isEvening = force || utcHour === 19;
   const isMonday  = force || dayOfWeek === 1;
+  const dayKey    = DAY_KEYS[dayOfWeek];
 
   const token = await getAccessToken();
   const docs = await firestoreListAll(token, "storage");
@@ -163,7 +183,7 @@ export default async function handler(req, res) {
     const appData = extractAppData(doc);
     if (!appData) continue;
 
-    const { notifications } = buildNotifications(appData, { today, isMidday, isEvening, isMonday });
+    const notifications = buildNotifications(appData, { today, isMidday, isEvening, isMonday, dayKey });
     for (const payload of notifications) {
       try {
         await webpush.sendNotification(subscription, JSON.stringify({ ...payload, url: "/" }));

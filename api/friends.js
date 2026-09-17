@@ -1,6 +1,7 @@
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import webpush from "web-push";
 
 if (!getApps().length) {
   initializeApp({
@@ -12,7 +13,24 @@ if (!getApps().length) {
   });
 }
 
+webpush.setVapidDetails(
+  "mailto:" + process.env.VAPID_EMAIL,
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
+
 const db = getFirestore();
+
+async function pushToUser(uid, payload) {
+  const snap = await db.collection("storage").doc(uid).get();
+  const sub = snap.data()?.pushSubscription;
+  if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) return;
+  try {
+    await webpush.sendNotification(sub, JSON.stringify({ ...payload, url: "/" }));
+  } catch (err) {
+    console.error("friends push error:", err.message);
+  }
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -49,6 +67,21 @@ export default async function handler(req, res) {
         fromRef.set({ friendUids: FieldValue.arrayUnion(request.toUid) }, { merge: true }),
         toRef.set({ friendUids: FieldValue.arrayUnion(request.fromUid) }, { merge: true }),
       ]);
+      pushToUser(request.fromUid, { title: "🤝 Friend request accepted", body: `${request.toUsername} accepted your friend request.`, tag: "friend-accepted" });
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === "notify_request") {
+      const { requestId } = req.body;
+      if (!requestId) return res.status(400).json({ error: "requestId required" });
+
+      const reqRef = db.collection("friendRequests").doc(requestId);
+      const reqSnap = await reqRef.get();
+      if (!reqSnap.exists) return res.status(404).json({ error: "Request not found" });
+      const request = reqSnap.data();
+      if (request.fromUid !== uid) return res.status(403).json({ error: "Not your request" });
+
+      pushToUser(request.toUid, { title: "🤝 New friend request", body: `${request.fromUsername} wants to be friends.`, tag: "friend-request" });
       return res.status(200).json({ ok: true });
     }
 

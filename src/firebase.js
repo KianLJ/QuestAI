@@ -281,10 +281,11 @@ export async function sendFriendRequest(username) {
   if (!existing.empty) return { error: "Request already sent." };
 
   try {
-    await addDoc(collection(db, "friendRequests"), {
+    const docRef = await addDoc(collection(db, "friendRequests"), {
       fromUid: me.uid, fromUsername: me.displayName || me.email, toUid, toUsername: targetName.data().username,
       status: "pending", createdAt: serverTimestamp(),
     });
+    callFriendsApi({ action: "notify_request", requestId: docRef.id }).catch(() => {});
     return { error: null };
   } catch (e) {
     return { error: "Couldn't send that request — try again." };

@@ -1,7 +1,6 @@
 // Quest Log Service Worker
 const CACHE_NAME = "questai-v1";
 
-// ---- Install & Activate ----
 self.addEventListener("install", (e) => {
   self.skipWaiting();
 });
@@ -10,7 +9,7 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(clients.claim());
 });
 
-// ---- Push Notifications (from Vercel cron) ----
+// ---- Push notifications (server-sent, via Vercel cron or friend-request events) ----
 self.addEventListener("push", (e) => {
   if (!e.data) return;
   let payload;
@@ -32,16 +31,16 @@ self.addEventListener("push", (e) => {
   );
 });
 
-// ---- Local Scheduled Notifications (focus timer, etc.) ----
-// The app posts a message to schedule a local notification at a specific time.
-// We use setTimeout inside the SW to fire it.
+// ---- Local scheduled notifications (focus timer, rest timer) ----
+// The app posts a message to schedule a notification at a specific time while
+// this SW instance stays alive; used for short in-session timers, not
+// long-delayed reminders (those go through server push instead).
 const pendingAlarms = new Map();
 
 self.addEventListener("message", (e) => {
   const { type, id, title, body, tag, url, fireAt } = e.data || {};
 
   if (type === "SCHEDULE_NOTIFICATION") {
-    // Cancel existing alarm with same id
     if (pendingAlarms.has(id)) clearTimeout(pendingAlarms.get(id));
 
     const delay = Math.max(0, fireAt - Date.now());
@@ -67,7 +66,7 @@ self.addEventListener("message", (e) => {
   }
 });
 
-// ---- Notification Click ----
+// ---- Notification click ----
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const url = e.notification.data?.url || "/";

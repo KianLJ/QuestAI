@@ -188,96 +188,104 @@ const ITEM_CATALOGUE = [
 ];
 
 // ---- SET BONUSES (18) — every item in exactly one set ----
+// Each set leans into one of five archetypes so equipping toward a set is a real
+// choice (economy, growth, tankiness, survivability, or burst) rather than every
+// set granting the same XP%+gold combo at a different number.
 const SETS = [
+  // ---- Merchant (gold) ----
   {
     id: "dawn_set", label: "Dawn Set", color: "#C9A227",
     items: ["wpn_sword","wpn_dagger","arm_leather","shd_buckler","title_keeper","title_rookie","badge_shield","theme_ember"],
-    requiredCount: 4, bonus: { xpPct: 0.1, goldFlat: 2 }, desc: "+10% XP, +2g/quest",
-  },
-  {
-    id: "bloom_set", label: "Bloom Set", color: "#4C9A6A",
-    items: ["wpn_spear","arm_studded","shd_heater","title_eternal","title_seeker","badge_flame","theme_verdant","aura_verdant"],
-    requiredCount: 3, bonus: { xpPct: 0.12, goldFlat: 1 }, desc: "+12% XP, +1g",
-  },
-  {
-    id: "storm_set", label: "Storm Set", color: "#7A9ABF",
-    items: ["wpn_stormhammer","arm_plate","shd_stormwall","shd_tower","title_storm","badge_lightning","theme_storm","aura_storm2"],
-    requiredCount: 4, bonus: { xpPct: 0.18, goldFlat: 2 }, desc: "+18% XP, +2g",
-  },
-  {
-    id: "frost_set", label: "Frost Set", color: "#4FA3C9",
-    items: ["wpn_frostblade","wpn_crossbow","arm_brigandine","shd_dragon","title_focused","badge_anchor","theme_frost","aura_frost2"],
-    requiredCount: 4, bonus: { xpPct: 0.15, goldFlat: 1 }, desc: "+15% XP, +1g",
-  },
-  {
-    id: "arcane_set", label: "Arcane Set", color: "#8A5FBF",
-    items: ["wpn_staff","arm_chain","arm_scale","shd_kite","title_archmage","badge_dragon","theme_arcane","aura_arcane2"],
-    requiredCount: 4, bonus: { xpPct: 0.2, goldFlat: 1 }, desc: "+20% XP, +1g",
-  },
-  {
-    id: "runic_set", label: "Runic Set", color: "#B8C4CE",
-    items: ["wpn_axe","wpn_maul","arm_runic","shd_rune","title_iron","title_wanderer","badge_trophy","theme_slate"],
-    requiredCount: 4, bonus: { xpPct: 0.22, goldFlat: 1 }, desc: "+22% XP, +1g",
-  },
-  {
-    id: "shadow_set", label: "Shadow Set", color: "#5A4F7A",
-    items: ["wpn_voidblade","arm_shadow","shd_voidwall","title_shadow","title_voidwalk","badge_skull","theme_void","aura_void2"],
-    requiredCount: 4, bonus: { xpPct: 0.25, goldFlat: 1 }, desc: "+25% XP, +1g",
-  },
-  {
-    id: "reaper_set", label: "Reaper Set", color: "#B33A3A",
-    items: ["wpn_scythe","wpn_lance","arm_voidweave","shd_plank","title_legend","badge_sword","theme_blood","aura_blood"],
-    requiredCount: 4, bonus: { xpPct: 0.2, goldFlat: 2 }, desc: "+20% XP, +2g",
+    requiredCount: 4, bonus: { goldFlat: 3 }, desc: "+3g/quest",
   },
   {
     id: "void_set", label: "Void Set", color: "#2A1F3D",
     items: ["wpn_club","arm_rags","shd_aegis","title_initiate","title_hunter","badge_voideye","theme_abyss","aura_none"],
-    requiredCount: 3, bonus: { xpPct: 0.15, goldFlat: 1 }, desc: "+15% XP, +1g",
-  },
-  {
-    id: "nebula_set", label: "Nebula Set", color: "#7A4FA8",
-    items: ["arm_celestial","title_starforged","badge_celestial","badge_target","theme_nebula","theme_crimson","aura_celestial2","badge_star"],
-    requiredCount: 4, bonus: { xpPct: 0.28, goldFlat: 2 }, desc: "+28% XP, +2g",
+    requiredCount: 3, bonus: { goldFlat: 5 }, desc: "+5g/quest",
   },
   {
     id: "celestial_set", label: "Celestial Set", color: "#E8A020",
     items: ["wpn_celestialswd","shd_celestial","badge_crown","theme_solaris","aura_divine","title_eternal2"],
-    requiredCount: 4, bonus: { xpPct: 0.3, goldFlat: 3 }, desc: "+30% XP, +3g",
+    requiredCount: 4, bonus: { goldFlat: 10 }, desc: "+10g/quest",
+  },
+  // ---- Scholar (XP) ----
+  {
+    id: "arcane_set", label: "Arcane Set", color: "#8A5FBF",
+    items: ["wpn_staff","arm_chain","arm_scale","shd_kite","title_archmage","badge_dragon","theme_arcane","aura_arcane2"],
+    requiredCount: 4, bonus: { xpPct: 0.24 }, desc: "+24% XP",
   },
   {
-    id: "undying_set", label: "Undying Set", color: "#C9A227",
-    items: ["badge_phoenix","aura_ember2","aura_silver","badge_moon","title_blade","title_chosen"],
-    requiredCount: 4, bonus: { xpPct: 0.35, goldFlat: 4 }, desc: "+35% XP, +4g",
-  },
-  {
-    id: "inferno_set", label: "Inferno Set", color: "#CC3300",
-    items: ["wpn_flameblade","arm_flameguard","shd_flameguard","badge_inferno","title_ember","theme_inferno","aura_inferno","title_doomknight"],
-    requiredCount: 4, bonus: { xpPct: 0.22, goldFlat: 2 }, desc: "+22% XP, +2g",
+    id: "nebula_set", label: "Nebula Set", color: "#7A4FA8",
+    items: ["arm_celestial","title_starforged","badge_celestial","badge_target","theme_nebula","theme_crimson","aura_celestial2","badge_star"],
+    requiredCount: 4, bonus: { xpPct: 0.27 }, desc: "+27% XP",
   },
   {
     id: "solar_set", label: "Solar Set", color: "#FFD700",
     items: ["wpn_solarblade","arm_dragonscale","shd_solarwall","badge_solar","title_solar","theme_sapphire","aura_solar","title_dawnbringer"],
-    requiredCount: 4, bonus: { xpPct: 0.28, goldFlat: 3 }, desc: "+28% XP, +3g",
+    requiredCount: 4, bonus: { xpPct: 0.29 }, desc: "+29% XP",
+  },
+  // ---- Guardian (defense) ----
+  {
+    id: "storm_set", label: "Storm Set", color: "#7A9ABF",
+    items: ["wpn_stormhammer","arm_plate","shd_stormwall","shd_tower","title_storm","badge_lightning","theme_storm","aura_storm2"],
+    requiredCount: 4, bonus: { defense: 11 }, desc: "+11 Defense",
+  },
+  {
+    id: "runic_set", label: "Runic Set", color: "#B8C4CE",
+    items: ["wpn_axe","wpn_maul","arm_runic","shd_rune","title_iron","title_wanderer","badge_trophy","theme_slate"],
+    requiredCount: 4, bonus: { defense: 9 }, desc: "+9 Defense",
   },
   {
     id: "doom_set", label: "Doom Set", color: "#6B0000",
     items: ["wpn_doomhammer","arm_soulweave","shd_doomshield","badge_doom","title_worldender","theme_doom","aura_doom","badge_storm"],
-    requiredCount: 4, bonus: { xpPct: 0.3, goldFlat: 3 }, desc: "+30% XP, +3g",
+    requiredCount: 4, bonus: { defense: 13 }, desc: "+13 Defense",
+  },
+  // ---- Vitality (max HP) ----
+  {
+    id: "bloom_set", label: "Bloom Set", color: "#4C9A6A",
+    items: ["wpn_spear","arm_studded","shd_heater","title_eternal","title_seeker","badge_flame","theme_verdant","aura_verdant"],
+    requiredCount: 3, bonus: { maxHealth: 17 }, desc: "+17 Max HP",
   },
   {
-    id: "ghost_set", label: "Ghost Set", color: "#D0D8E0",
-    items: ["wpn_ghostblade","arm_ironhide","shd_ghostwall","badge_wolf","title_ghostking","theme_ghost","aura_ghost","title_cursed"],
-    requiredCount: 4, bonus: { xpPct: 0.22, goldFlat: 2 }, desc: "+22% XP, +2g",
+    id: "reaper_set", label: "Reaper Set", color: "#B33A3A",
+    items: ["wpn_scythe","wpn_lance","arm_voidweave","shd_plank","title_legend","badge_sword","theme_blood","aura_blood"],
+    requiredCount: 4, bonus: { maxHealth: 26 }, desc: "+26 Max HP",
   },
   {
     id: "eternal_set", label: "Eternal Set", color: "#C9A227",
     items: ["shd_eternal","badge_eternal","title_warden","theme_rose","aura_rose","wpn_trident","arm_padded","badge_sun"],
-    requiredCount: 4, bonus: { xpPct: 0.28, goldFlat: 2 }, desc: "+28% XP, +2g",
+    requiredCount: 4, bonus: { maxHealth: 19 }, desc: "+19 Max HP",
+  },
+  {
+    id: "undying_set", label: "Undying Set", color: "#C9A227",
+    items: ["badge_phoenix","aura_ember2","aura_silver","badge_moon","title_blade","title_chosen"],
+    requiredCount: 4, bonus: { maxHealth: 16 }, desc: "+16 Max HP",
+  },
+  // ---- Assassin (crit chance) ----
+  {
+    id: "frost_set", label: "Frost Set", color: "#4FA3C9",
+    items: ["wpn_frostblade","wpn_crossbow","arm_brigandine","shd_dragon","title_focused","badge_anchor","theme_frost","aura_frost2"],
+    requiredCount: 4, bonus: { critChance: 0.1 }, desc: "+10% Crit",
   },
   {
     id: "blade_set", label: "Blade Set", color: "#4FA3C9",
     items: ["wpn_katana","wpn_warbow","wpn_runeaxe","arm_bronze","arm_stormplate","shd_ironround","shd_woodround","badge_serpent","badge_rune","title_bloodknight","theme_jade","theme_copper","theme_prismatic","aura_jade","aura_prismatic"],
-    requiredCount: 5, bonus: { xpPct: 0.2, goldFlat: 2 }, desc: "+20% XP, +2g",
+    requiredCount: 5, bonus: { critChance: 0.09 }, desc: "+9% Crit",
+  },
+  {
+    id: "ghost_set", label: "Ghost Set", color: "#D0D8E0",
+    items: ["wpn_ghostblade","arm_ironhide","shd_ghostwall","badge_wolf","title_ghostking","theme_ghost","aura_ghost","title_cursed"],
+    requiredCount: 4, bonus: { critChance: 0.1 }, desc: "+10% Crit",
+  },
+  {
+    id: "inferno_set", label: "Inferno Set", color: "#CC3300",
+    items: ["wpn_flameblade","arm_flameguard","shd_flameguard","badge_inferno","title_ember","theme_inferno","aura_inferno","title_doomknight"],
+    requiredCount: 4, bonus: { critChance: 0.12 }, desc: "+12% Crit",
+  },
+  {
+    id: "shadow_set", label: "Shadow Set", color: "#5A4F7A",
+    items: ["wpn_voidblade","arm_shadow","shd_voidwall","title_shadow","title_voidwalk","badge_skull","theme_void","aura_void2"],
+    requiredCount: 4, bonus: { critChance: 0.12 }, desc: "+12% Crit",
   },
 ];
 
@@ -300,8 +308,11 @@ function computeActiveStats(equipped) {
     const matches = set.items.filter((id) => equippedIds.includes(id)).length;
     if (matches >= set.requiredCount) {
       activeSets.push(set);
-      xpPct += set.bonus.xpPct;
-      goldFlat += set.bonus.goldFlat;
+      xpPct += set.bonus.xpPct || 0;
+      goldFlat += set.bonus.goldFlat || 0;
+      defense += set.bonus.defense || 0;
+      maxHealth += set.bonus.maxHealth || 0;
+      critChance += set.bonus.critChance || 0;
     }
   });
   return { xpPct, goldFlat, defense, maxHealth, blockChance, critChance, activeSets };
