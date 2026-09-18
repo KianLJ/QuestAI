@@ -15,7 +15,7 @@ import {
 import {
   auth, onAuthChange, logOut, updateUsername, changePassword,
   saveProfile, getProfile, sendFriendRequest, listFriendRequests, declineFriendRequest, cancelFriendRequest, acceptFriendRequest, removeFriend,
-  sendChallenge, listChallenges, declineChallenge, submitChallengeAttempt, markChallengerClaimed, markChallengeDelivered,
+  sendChallenge, listChallenges, declineChallenge, deleteChallenge, updateChallengeTarget, submitChallengeAttempt, markChallengerClaimed, markChallengeDelivered,
 } from "./firebase";
 import AuthScreen from "./AuthScreen";
 
@@ -974,6 +974,9 @@ function AppContent({ user }) {
   const [challengeError, setChallengeError] = useState(null);
   const [challengeResultBanner, setChallengeResultBanner] = useState(null);
   const [challengePickerExIdx, setChallengePickerExIdx] = useState(null); // which session exercise is picking a friend to challenge
+  const [editingChallengeId, setEditingChallengeId] = useState(null);
+  const [editChallengeWeight, setEditChallengeWeight] = useState("");
+  const [editChallengeReps, setEditChallengeReps] = useState("");
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
   const [newPasswordInput, setNewPasswordInput] = useState("");
   const [passwordMsg, setPasswordMsg] = useState(null);
@@ -2107,6 +2110,32 @@ function AppContent({ user }) {
   async function refreshChallenges() {
     setChallengesLoading(true);
     const result = await listChallenges();
+    // One workout used to send a separate challenge per completed set instead of one
+    // per exercise (fixed at the source now) — clean up any leftover duplicates: same
+    // friend + exercise + day, still pending and never delivered into their workout,
+    // so nothing already in motion for the friend gets touched.
+    const keyOf = (c) => `${c.toUid}|${c.exerciseId}|${c.date}`;
+    // Groups that already have a representative "in motion" (delivered into a session,
+    // completed, or declined) don't need a pending/undelivered duplicate kept around at
+    // all — that representative already covers it, so every duplicate can go.
+    const inMotionKeys = new Set(result.outgoing.filter((c) => c.status !== "pending" || c.delivered).map(keyOf));
+    const dupGroups = {};
+    for (const c of result.outgoing) {
+      if (c.status !== "pending" || c.delivered) continue;
+      (dupGroups[keyOf(c)] = dupGroups[keyOf(c)] || []).push(c);
+    }
+    const toDelete = [];
+    Object.entries(dupGroups).forEach(([key, group]) => {
+      if (inMotionKeys.has(key)) { toDelete.push(...group); return; }
+      if (group.length < 2) return;
+      group.sort((a, b) => (b.challengerScore || 0) - (a.challengerScore || 0));
+      toDelete.push(...group.slice(1));
+    });
+    if (toDelete.length > 0) {
+      const deletedIds = new Set(toDelete.map((c) => c.id));
+      toDelete.forEach((c) => deleteChallenge(c.id));
+      result.outgoing = result.outgoing.filter((c) => !deletedIds.has(c.id));
+    }
     const toClaim = result.outgoing.filter((c) => c.status === "completed" && !c.challengerClaimed);
     for (const c of toClaim) {
       const won = c.winnerUid === user.uid;
@@ -2122,6 +2151,32 @@ function AppContent({ user }) {
     }
     setChallenges(result);
     setChallengesLoading(false);
+  }
+
+  // Only safe to edit/delete before the friend's next workout has actually picked
+  // it up — once delivered it's already been copied into their session locally,
+  // so changing or removing the Firestore doc at that point wouldn't reach them.
+  async function handleDeleteChallenge(id) {
+    setChallengeBusy(true);
+    await deleteChallenge(id);
+    await refreshChallenges();
+    setChallengeBusy(false);
+  }
+  function startEditChallenge(c) {
+    setEditingChallengeId(c.id);
+    setEditChallengeWeight(String(c.challengerWeight ?? ""));
+    setEditChallengeReps(String(c.challengerReps ?? ""));
+  }
+  async function handleSaveChallengeEdit(c) {
+    if (!editChallengeWeight || !editChallengeReps) return;
+    setChallengeBusy(true);
+    const catalogueExercise = EXERCISE_CATALOGUE.find((e) => e.id === c.exerciseId);
+    const profile = getExerciseRankProfile(catalogueExercise);
+    const score = computeSetScore(profile, editChallengeWeight, editChallengeReps);
+    await updateChallengeTarget(c.id, Number(editChallengeWeight) || 0, Number(editChallengeReps) || 0, score);
+    setEditingChallengeId(null);
+    await refreshChallenges();
+    setChallengeBusy(false);
   }
 
   useEffect(() => {
@@ -4816,19 +4871,44 @@ function AppContent({ user }) {
                       <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sent</div>
                       {challenges.outgoing.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No challenges sent yet.</p>}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {challenges.outgoing.map((c) => (
-                          <div key={c.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
-                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: 600 }}>{c.toUsername} · {c.exerciseName}</span>
-                            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Your throw: {c.challengerWeight}kg × {c.challengerReps}</span>
-                            {c.status === "pending" && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Waiting for them to attempt...</span>}
-                            {c.status === "completed" && (
-                              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
-                                {c.winnerUid === user.uid ? "You won" : c.winnerUid ? "They won" : "Tied"} — their attempt: {c.opponentWeight}kg × {c.opponentReps}
-                              </span>
-                            )}
-                            {c.status === "declined" && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Ignored — declined</span>}
-                          </div>
-                        ))}
+                        {challenges.outgoing.map((c) => {
+                          const canEditOrDelete = c.status === "pending" && !c.delivered;
+                          const canForceDelete = c.status === "pending" && c.delivered;
+                          const isEditing = editingChallengeId === c.id;
+                          return (
+                            <div key={c.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                                <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: 600 }}>{c.toUsername} · {c.exerciseName}</span>
+                                {canEditOrDelete && !isEditing && (
+                                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                                    <button onClick={() => startEditChallenge(c)} title="Edit" aria-label="Edit challenge" className="qlog-btn" style={{ background: "none", border: "none", color: accent, cursor: "pointer", padding: 2, display: "flex" }}><Edit2 size={13} /></button>
+                                    <button onClick={() => handleDeleteChallenge(c.id)} disabled={challengeBusy} title="Delete" aria-label="Delete challenge" className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: challengeBusy ? "default" : "pointer", padding: 2, display: "flex" }}><Trash2 size={13} /></button>
+                                  </div>
+                                )}
+                                {canForceDelete && (
+                                  <button onClick={() => handleDeleteChallenge(c.id)} disabled={challengeBusy} title="It's already in their workout — if they attempt it after this, they won't get credit or a reward for it" className="qlog-btn" style={{ flexShrink: 0, fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 600, color: "#8A2E44", background: "none", border: "1px solid #8A2E4466", borderRadius: 6, padding: "3px 8px", cursor: challengeBusy ? "default" : "pointer" }}>Cancel anyway</button>
+                                )}
+                              </div>
+                              {isEditing ? (
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <input type="number" inputMode="decimal" value={editChallengeWeight} onChange={(e) => setEditChallengeWeight(e.target.value)} placeholder="kg" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
+                                  <input type="number" inputMode="numeric" value={editChallengeReps} onChange={(e) => setEditChallengeReps(e.target.value)} placeholder="reps" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
+                                  <button onClick={() => handleSaveChallengeEdit(c)} disabled={challengeBusy || !editChallengeWeight || !editChallengeReps} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "6px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer", flexShrink: 0 }}>Save</button>
+                                  <button onClick={() => setEditingChallengeId(null)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "6px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer", flexShrink: 0 }}>Cancel</button>
+                                </div>
+                              ) : (
+                                <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Your throw: {c.challengerWeight}kg × {c.challengerReps}</span>
+                              )}
+                              {c.status === "pending" && !isEditing && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>{c.delivered ? "Waiting for them to attempt..." : "Not yet in their next workout — still editable"}</span>}
+                              {c.status === "completed" && (
+                                <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
+                                  {c.winnerUid === user.uid ? "You won" : c.winnerUid ? "They won" : "Tied"} — their attempt: {c.opponentWeight}kg × {c.opponentReps}
+                                </span>
+                              )}
+                              {c.status === "declined" && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Ignored — declined</span>}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>

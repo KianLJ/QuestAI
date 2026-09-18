@@ -377,6 +377,16 @@ export async function declineChallenge(id) {
   catch (e) { return { error: "Couldn't decline — try again." }; }
 }
 
+export async function deleteChallenge(id) {
+  try { await deleteDoc(doc(db, "challenges", id)); }
+  catch (e) { /* best-effort — will just retry next refresh */ }
+}
+
+export async function updateChallengeTarget(id, weight, reps, score) {
+  try { await updateDoc(doc(db, "challenges", id), { challengerWeight: weight, challengerReps: reps, challengerScore: score }); return { error: null }; }
+  catch (e) { return { error: "Couldn't update that challenge — try again." }; }
+}
+
 export async function submitChallengeAttempt(id, weight, reps, score, winnerUid) {
   try {
     await updateDoc(doc(db, "challenges", id), { opponentWeight: weight, opponentReps: reps, opponentScore: score, status: "completed", winnerUid, opponentClaimed: true });
