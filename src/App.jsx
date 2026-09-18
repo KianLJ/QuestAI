@@ -1241,6 +1241,30 @@ function AppContent({ user }) {
     };
   }, [focusOpen]);
 
+  // ---- Keep screen awake while a workout is active ----
+  useEffect(() => {
+    if (!workoutSession || !("wakeLock" in navigator)) return;
+    let lock = null;
+    let cancelled = false;
+    const acquire = async () => {
+      try {
+        lock = await navigator.wakeLock.request("screen");
+      } catch (e) {
+        console.warn("wake lock failed:", e);
+      }
+    };
+    acquire();
+    const onVisibility = () => {
+      if (!cancelled && document.visibilityState === "visible" && !lock) acquire();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      lock?.release().catch(() => {});
+    };
+  }, [!!workoutSession]);
+
   const { level, into, need } = levelFromXP(totalXP);
   const rank = rankForLevel(level);
   const nextMilestone = MILESTONE_LEVELS.find((m) => level < m);
