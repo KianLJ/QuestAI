@@ -15,7 +15,7 @@ import {
 import {
   auth, onAuthChange, logOut, updateUsername, changePassword,
   saveProfile, getProfile, sendFriendRequest, listFriendRequests, declineFriendRequest, cancelFriendRequest, acceptFriendRequest, removeFriend,
-  sendChallenge, listChallenges, declineChallenge, submitChallengeAttempt, markChallengerClaimed,
+  sendChallenge, listChallenges, declineChallenge, submitChallengeAttempt, markChallengerClaimed, markChallengeDelivered,
 } from "./firebase";
 import AuthScreen from "./AuthScreen";
 
@@ -849,18 +849,10 @@ function AppContent({ user }) {
   const [friendsRefreshTick, setFriendsRefreshTick] = useState(0);
   const [challenges, setChallenges] = useState({ incoming: [], outgoing: [] });
   const [challengesLoading, setChallengesLoading] = useState(false);
-  const [challengeModalOpen, setChallengeModalOpen] = useState(false);
-  const [newChallengeFriendUid, setNewChallengeFriendUid] = useState(null);
-  const [challengeExerciseId, setChallengeExerciseId] = useState(null);
-  const [challengeExerciseSearch, setChallengeExerciseSearch] = useState("");
-  const [challengeWeight, setChallengeWeight] = useState("");
-  const [challengeReps, setChallengeReps] = useState("");
   const [challengeBusy, setChallengeBusy] = useState(false);
   const [challengeError, setChallengeError] = useState(null);
-  const [attemptingChallengeId, setAttemptingChallengeId] = useState(null); // opponent entering their attempt
-  const [attemptWeight, setAttemptWeight] = useState("");
-  const [attemptReps, setAttemptReps] = useState("");
   const [challengeResultBanner, setChallengeResultBanner] = useState(null);
+  const [challengePickerExIdx, setChallengePickerExIdx] = useState(null); // which session exercise is picking a friend to challenge
   const [currentPasswordInput, setCurrentPasswordInput] = useState("");
   const [newPasswordInput, setNewPasswordInput] = useState("");
   const [passwordMsg, setPasswordMsg] = useState(null);
@@ -1688,6 +1680,20 @@ function AppContent({ user }) {
         sets: Array.from({ length: pe.sets || 3 }, () => ({ weight: pe.targetWeight || "", reps: "", completed: false })),
       };
     });
+    // Deliver at most one pending incoming challenge as a bonus "add-on" exercise —
+    // it only ever gets offered in the very next workout you start.
+    const pendingChallenge = challenges.incoming.find((c) => c.status === "pending" && !c.delivered);
+    if (pendingChallenge) {
+      const catalogueExercise = EXERCISE_CATALOGUE.find((e) => e.id === pendingChallenge.exerciseId);
+      exercises.push({
+        exerciseId: pendingChallenge.exerciseId, name: pendingChallenge.exerciseName, restSeconds: 90, targetReps: String(pendingChallenge.challengerReps),
+        sets: [{ weight: "", reps: "", completed: false }],
+        isChallengeAddon: true, challengeId: pendingChallenge.id, challengeFrom: pendingChallenge.fromUsername, challengeFromUid: pendingChallenge.fromUid,
+        challengeTargetWeight: pendingChallenge.challengerWeight, challengeTargetReps: pendingChallenge.challengerReps, challengeTargetScore: pendingChallenge.challengerScore,
+      });
+      markChallengeDelivered(pendingChallenge.id);
+      setChallenges((c) => ({ ...c, incoming: c.incoming.map((x) => x.id === pendingChallenge.id ? { ...x, delivered: true } : x) }));
+    }
     setWorkoutSession({ planId: plan.id, planName: plan.name, startedAt: Date.now(), exercises, restTimer: null, setsXp: 0 });
     setSessionOverlayOpen(true);
   }
@@ -1710,6 +1716,7 @@ function AppContent({ user }) {
   }
   function logSet(exIdx, setIdx, weight, reps, restSeconds) {
     const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * effectiveXpPct);
+    const loggedExercise = workoutSession?.exercises?.[exIdx];
     setWorkoutSession((s) => {
       if (!s) return s;
       const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
@@ -1728,6 +1735,7 @@ function AppContent({ user }) {
     setTotalXP((t) => t + setXpGain);
     setWorkoutXpPop({ key: `${exIdx}-${setIdx}-${Date.now()}`, xp: setXpGain });
     setTimeout(() => setWorkoutXpPop(null), 900);
+    if (loggedExercise?.isChallengeAddon && !loggedExercise.sets[setIdx]?.completed) resolveChallengeAttempt(loggedExercise, weight, reps);
   }
   function uncompleteSet(exIdx, setIdx) {
     const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * effectiveXpPct);
@@ -1764,6 +1772,26 @@ function AppContent({ user }) {
     setWorkoutXpPop({ key: "complete-" + Date.now(), xp: xpGain });
     setTimeout(() => setWorkoutXpPop(null), 1200);
     if (newLevel > prevLevel) { spawnConfetti(); setStatChoiceQueue((q) => [...q, { level: newLevel, rank: rankForLevel(newLevel) }]); }
+
+    // Send off any exercise flagged as a challenge, using its best completed set.
+    const flaggedEx = workoutSession.exercises.find((e) => e.challengeFriendUid);
+    if (flaggedEx) {
+      const catalogueExercise = EXERCISE_CATALOGUE.find((e) => e.id === flaggedEx.exerciseId);
+      const profile = getExerciseRankProfile(catalogueExercise);
+      const bestSet = flaggedEx.sets.filter((s) => s.completed).reduce((best, s) => {
+        const score = computeSetScore(profile, s.weight, s.reps);
+        return score > (best?.score || 0) ? { weight: Number(s.weight) || 0, reps: Number(s.reps) || 0, score } : best;
+      }, null);
+      if (bestSet && catalogueExercise) {
+        sendChallenge(flaggedEx.challengeFriendUid, flaggedEx.challengeFriendUsername, catalogueExercise, bestSet.weight, bestSet.reps, bestSet.score, today);
+        setFriendsRefreshTick((t) => t + 1);
+      }
+    }
+    // Auto-decline any incoming challenge add-on that wasn't attempted this session.
+    workoutSession.exercises.forEach((e) => {
+      if (e.isChallengeAddon && !e.sets.some((s) => s.completed)) declineChallenge(e.challengeId);
+    });
+
     setWorkoutSession(null);
     setSessionOverlayOpen(false);
   }
@@ -1893,6 +1921,16 @@ function AppContent({ user }) {
     refreshChallenges();
   }, [activeTab, activeWorkoutTab, myUsername, friendsRefreshTick]);
 
+  // Challenges also need to stay fresh on Home (so the challenger sees the result
+  // banner there) and on Workout (so a pending incoming challenge is known before
+  // you start a session and it can be delivered as an add-on exercise, and so the
+  // in-session friend picker has friend data even if Friends was never opened).
+  useEffect(() => {
+    if (!myUsername || activeTab === "friends") return; // already covered above
+    if (activeTab === "home" || activeTab === "workout") refreshChallenges();
+    if (activeTab === "workout") refreshFriends();
+  }, [activeTab, myUsername, friendsRefreshTick]);
+
   async function handleSendFriendRequest() {
     if (friendSearchBusy || !friendSearchInput.trim()) return;
     setFriendSearchBusy(true);
@@ -1927,60 +1965,35 @@ function AppContent({ user }) {
   }
 
   // ---- Exercise challenges ----
+  // Challenges are now created from inside an active workout (flag an exercise, it
+  // sends once you finish with a completed set) and delivered as an add-on exercise
+  // in the opponent's next workout, rather than a standalone picker/modal flow.
   const challengedToday = challenges.outgoing.some((c) => c.date === today);
 
-  async function handleSendChallenge() {
-    if (challengeBusy || challengedToday || !newChallengeFriendUid || !challengeExerciseId) return;
-    const exercise = EXERCISE_CATALOGUE.find((e) => e.id === challengeExerciseId);
-    const friend = friendsData[newChallengeFriendUid];
-    if (!exercise || !friend) return;
-    const profile = getExerciseRankProfile(exercise);
-    const score = computeSetScore(profile, challengeWeight, challengeReps);
-    if (score <= 0) { setChallengeError("Enter a valid weight and reps."); return; }
-    setChallengeBusy(true);
-    setChallengeError(null);
-    const result = await sendChallenge(newChallengeFriendUid, friend.username, exercise, Number(challengeWeight) || 0, Number(challengeReps) || 0, score, today);
-    setChallengeBusy(false);
-    if (result.error) { setChallengeError(result.error); return; }
-    setChallengeModalOpen(false);
-    setNewChallengeFriendUid(null);
-    setChallengeExerciseId(null);
-    setChallengeExerciseSearch("");
-    setChallengeWeight("");
-    setChallengeReps("");
-    setFriendsRefreshTick((t) => t + 1);
+  function flagChallengeExercise(exIdx, friendUid, friendUsername) {
+    setWorkoutSession((s) => s ? {
+      ...s, exercises: s.exercises.map((e, i) => i === exIdx ? { ...e, challengeFriendUid: friendUid, challengeFriendUsername: friendUsername } : e),
+    } : s);
+    setChallengePickerExIdx(null);
   }
 
-  async function handleDeclineChallenge(id) {
-    await declineChallenge(id);
-    setFriendsRefreshTick((t) => t + 1);
-  }
-
-  async function handleSubmitChallengeAttempt(challenge) {
-    if (challengeBusy) return;
-    const exercise = EXERCISE_CATALOGUE.find((e) => e.id === challenge.exerciseId);
-    const profile = getExerciseRankProfile(exercise);
-    const score = computeSetScore(profile, attemptWeight, attemptReps);
-    if (score <= 0) { setChallengeError("Enter a valid weight and reps."); return; }
-    setChallengeBusy(true);
-    setChallengeError(null);
-    const tie = score === challenge.challengerScore;
-    const won = score > challenge.challengerScore;
-    const winnerUid = tie ? null : (won ? user.uid : challenge.fromUid);
-    const result = await submitChallengeAttempt(challenge.id, Number(attemptWeight) || 0, Number(attemptReps) || 0, score, winnerUid);
-    setChallengeBusy(false);
-    if (result.error) { setChallengeError(result.error); return; }
+  async function resolveChallengeAttempt(exercise, weight, reps) {
+    const catalogueExercise = EXERCISE_CATALOGUE.find((e) => e.id === exercise.exerciseId);
+    const profile = getExerciseRankProfile(catalogueExercise);
+    const score = computeSetScore(profile, weight, reps);
+    const tie = score === exercise.challengeTargetScore;
+    const won = score > exercise.challengeTargetScore;
+    const winnerUid = tie ? null : (won ? user.uid : exercise.challengeFromUid);
+    const result = await submitChallengeAttempt(exercise.challengeId, Number(weight) || 0, Number(reps) || 0, score, winnerUid);
+    if (result.error) return;
     const baseXp = CHALLENGE_BASE_XP + (won ? CHALLENGE_WIN_BONUS_XP : 0);
     const baseGold = CHALLENGE_BASE_GOLD + (won ? CHALLENGE_WIN_BONUS_GOLD : 0);
     const gearXp = Math.round(baseXp * effectiveXpPct);
     const goldAwarded = Math.round(baseGold * (1 + rankBonusPct)) + activeStats.goldFlat;
     setTotalXP((x) => x + baseXp + gearXp);
     setGold((g) => g + goldAwarded);
-    setChallengeResultBanner({ won, tie, exerciseName: challenge.exerciseName, opponentName: challenge.fromUsername, xp: baseXp + gearXp, gold: goldAwarded });
+    setChallengeResultBanner({ won, tie, exerciseName: exercise.name, opponentName: exercise.challengeFrom, xp: baseXp + gearXp, gold: goldAwarded });
     setTimeout(() => setChallengeResultBanner(null), 3600);
-    setAttemptingChallengeId(null);
-    setAttemptWeight("");
-    setAttemptReps("");
     setFriendsRefreshTick((t) => t + 1);
   }
 
@@ -2641,7 +2654,7 @@ function AppContent({ user }) {
       {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 14 }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
       {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
       {rankTierBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${rankTierBanner.color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Trophy size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{rankTierBanner.tierName} I reached! +{rankTierBanner.xp} XP +{rankTierBanner.gold}g</span></div>}
-      {challengeResultBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0) + (rankTierBanner ? 60 : 0), left: "50%", zIndex: 60, background: challengeResultBanner.tie ? "linear-gradient(135deg, #8A8578, #1B2430)" : challengeResultBanner.won ? "linear-gradient(135deg, #4C9A6A, #1B2430)" : "linear-gradient(135deg, #8A2E44, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sword size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{challengeResultBanner.tie ? `Tied ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : challengeResultBanner.won ? `Beat ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : `${challengeResultBanner.opponentName} won on ${challengeResultBanner.exerciseName}`} +{challengeResultBanner.xp} XP +{challengeResultBanner.gold}g</span></div>}
+      {challengeResultBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0) + (rankTierBanner ? 60 : 0), left: "50%", zIndex: 96, background: challengeResultBanner.tie ? "linear-gradient(135deg, #8A8578, #1B2430)" : challengeResultBanner.won ? "linear-gradient(135deg, #4C9A6A, #1B2430)" : "linear-gradient(135deg, #8A2E44, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sword size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{challengeResultBanner.tie ? `Tied ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : challengeResultBanner.won ? `Beat ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : `${challengeResultBanner.opponentName} won on ${challengeResultBanner.exerciseName}`} +{challengeResultBanner.xp} XP +{challengeResultBanner.gold}g</span></div>}
 
       {/* Confetti burst on level up */}
       {confettiPieces.map((p) => (
@@ -2884,26 +2897,43 @@ function AppContent({ user }) {
           )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {workoutSession.exercises.map((ex, exIdx) => (
-             <div key={exIdx} className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
-                  <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {ex.sets.map((st, setIdx) => (
-                    <WorkoutSetRow
-                      key={setIdx}
-                      setNum={setIdx + 1}
-                      set={st}
-                      accent={accent}
-                      onLog={(weight, reps) => logSet(exIdx, setIdx, weight, reps, ex.restSeconds)}
-                      onUncomplete={() => uncompleteSet(exIdx, setIdx)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
+            {(() => {
+              const alreadyFlagged = workoutSession.exercises.some((e) => e.challengeFriendUid);
+              return workoutSession.exercises.map((ex, exIdx) => {
+                const canChallenge = !ex.isChallengeAddon && !ex.challengeFriendUid && !alreadyFlagged && !challengedToday && EXERCISE_CATALOGUE.some((e) => e.id === ex.exerciseId);
+                return (
+                 <div key={exIdx} className="qlog-card" style={{ background: ex.isChallengeAddon ? `${accent}14` : "#232E3D", border: `1px solid ${ex.isChallengeAddon ? accent : "#33414F"}`, borderRadius: 10, padding: "10px 12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
+                      <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      {ex.isChallengeAddon && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>⚔ Beat {ex.challengeFrom}'s {ex.challengeTargetWeight}kg × {ex.challengeTargetReps} — ignore to decline</span>
+                      )}
+                      {ex.challengeFriendUid && (
+                        <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>🏆 Challenging {ex.challengeFriendUsername} on this exercise</span>
+                      )}
+                      {canChallenge && (
+                        <button onClick={() => setChallengePickerExIdx(exIdx)} className="qlog-btn" style={{ fontSize: 9, fontWeight: 700, color: accent, background: accent + "18", border: `1px solid ${accent}44`, borderRadius: 10, padding: "2px 8px", cursor: "pointer" }}>Challenge?</button>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {ex.sets.map((st, setIdx) => (
+                        <WorkoutSetRow
+                          key={setIdx}
+                          setNum={setIdx + 1}
+                          set={st}
+                          accent={accent}
+                          onLog={(weight, reps) => logSet(exIdx, setIdx, weight, reps, ex.restSeconds)}
+                          onUncomplete={() => uncompleteSet(exIdx, setIdx)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
 
           <button onClick={finishWorkout} className="qlog-btn" style={{ width: "100%", marginTop: 16, background: accent, border: "none", borderRadius: 10, padding: "13px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>Finish Workout</button>
@@ -2944,79 +2974,21 @@ function AppContent({ user }) {
         </div>
       )}
 
-      {challengeModalOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => { setChallengeModalOpen(false); setNewChallengeFriendUid(null); setChallengeExerciseId(null); setChallengeError(null); }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 380, maxHeight: "85vh", overflowY: "auto" }}>
-            <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Sword size={16} color={accent} /> New Challenge</h3>
-
-            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Friend</label>
-            <select value={newChallengeFriendUid || ""} onChange={(e) => setNewChallengeFriendUid(e.target.value || null)} style={{ width: "100%", marginBottom: 14, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }}>
-              <option value="">Choose a friend...</option>
-              {friendIds.map((uid) => friendsData[uid] && <option key={uid} value={uid}>{friendsData[uid].username}</option>)}
-            </select>
-
-            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Exercise</label>
-            <input value={challengeExerciseSearch} onChange={(e) => { setChallengeExerciseSearch(e.target.value); setChallengeExerciseId(null); }} placeholder="Search exercises..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
-            {!challengeExerciseId && challengeExerciseSearch.trim() && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto", marginBottom: 10 }}>
-                {EXERCISE_CATALOGUE.filter((ex) => ex.name.toLowerCase().includes(challengeExerciseSearch.toLowerCase())).slice(0, 20).map((ex) => (
-                  <button key={ex.id} onClick={() => { setChallengeExerciseId(ex.id); setChallengeExerciseSearch(ex.name); }} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 6, padding: "7px 9px", fontSize: 12, color: "#EDE4D3", textAlign: "left", cursor: "pointer" }}>{ex.name}</button>
-                ))}
-                {EXERCISE_CATALOGUE.filter((ex) => ex.name.toLowerCase().includes(challengeExerciseSearch.toLowerCase())).length === 0 && (
-                  <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No exercises match.</p>
-                )}
-              </div>
-            )}
-
-            {challengeExerciseId && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Weight (kg)</label>
-                  <input type="number" min="0" step="0.5" value={challengeWeight} onChange={(e) => setChallengeWeight(e.target.value)} placeholder="0" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Reps</label>
-                  <input type="number" min="0" value={challengeReps} onChange={(e) => setChallengeReps(e.target.value)} placeholder="0" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
-                </div>
-              </div>
-            )}
-
-            {challengeError && <p style={{ fontSize: 12, color: "#C1652B", margin: "0 0 12px" }}>{challengeError}</p>}
-
-            <button onClick={handleSendChallenge} disabled={challengeBusy || !newChallengeFriendUid || !challengeExerciseId} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer", opacity: (challengeBusy || !newChallengeFriendUid || !challengeExerciseId) ? 0.6 : 1 }}>
-              {challengeBusy ? "Sending..." : "Send Challenge"}
-            </button>
+      {challengePickerExIdx !== null && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 95, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setChallengePickerExIdx(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 320 }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Sword size={16} color={accent} /> Challenge a friend</h3>
+            <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 14px" }}>Your best completed set on this exercise gets sent once you finish the workout.</p>
+            {friendIds.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>Add a friend first to challenge them.</p>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14, maxHeight: 240, overflowY: "auto" }}>
+              {friendIds.map((uid) => friendsData[uid] && (
+                <button key={uid} onClick={() => flagChallengeExercise(challengePickerExIdx, uid, friendsData[uid].username)} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", fontSize: 13, color: "#EDE4D3", textAlign: "left", cursor: "pointer" }}>{friendsData[uid].username}</button>
+              ))}
+            </div>
+            <button onClick={() => setChallengePickerExIdx(null)} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
           </div>
         </div>
       )}
-
-      {attemptingChallengeId && (() => {
-        const challenge = challenges.incoming.find((c) => c.id === attemptingChallengeId);
-        if (!challenge) return null;
-        return (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => { setAttemptingChallengeId(null); setChallengeError(null); }}>
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }}>
-              <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>{challenge.exerciseName}</h3>
-              <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 14px" }}>Beat {challenge.fromUsername}'s {challenge.challengerWeight}kg × {challenge.challengerReps}</p>
-              <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Weight (kg)</label>
-                  <input autoFocus type="number" min="0" step="0.5" value={attemptWeight} onChange={(e) => setAttemptWeight(e.target.value)} placeholder="0" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Reps</label>
-                  <input type="number" min="0" value={attemptReps} onChange={(e) => setAttemptReps(e.target.value)} placeholder="0" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
-                </div>
-              </div>
-              {challengeError && <p style={{ fontSize: 12, color: "#C1652B", margin: "0 0 12px" }}>{challengeError}</p>}
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <button onClick={() => handleSubmitChallengeAttempt(challenge)} disabled={challengeBusy} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>{challengeBusy ? "Submitting..." : "Submit Attempt"}</button>
-                <button onClick={() => { setAttemptingChallengeId(null); setChallengeError(null); }} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Quest detail */}
       {/* Shift modal */}
@@ -4565,31 +4537,27 @@ function AppContent({ user }) {
 
                 {activeFriendsTab === "challenges" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                    {challengedToday ? (
-                      <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>You've already sent a challenge today — come back tomorrow.</p>
-                    ) : (
-                      <button onClick={() => setChallengeModalOpen(true)} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}><Sword size={14} /> New Challenge</button>
-                    )}
+                    <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>
+                      {challengedToday
+                        ? "You've already sent a challenge today — come back tomorrow."
+                        : "Start a workout and tap \"Challenge?\" next to an exercise to send one — one per day."}
+                    </p>
                     <div>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Incoming</div>
-                      {challenges.incoming.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No challenges yet.</p>}
+                      {challenges.incoming.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No challenges yet — accepted ones show up as a bonus exercise in your next workout.</p>}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {challenges.incoming.map((c) => (
                           <div key={c.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
                             <span style={{ fontSize: 12, color: "#EDE4D3", fontWeight: 600 }}>{c.fromUsername} · {c.exerciseName}</span>
                             <span style={{ fontSize: 11, color: "#8A8578" }}>Beat: {c.challengerWeight}kg × {c.challengerReps}</span>
-                            {c.status === "pending" && (
-                              <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
-                                <button onClick={() => { setAttemptingChallengeId(c.id); setChallengeError(null); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Beat it</button>
-                                <button onClick={() => handleDeclineChallenge(c.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Decline</button>
-                              </div>
-                            )}
+                            {c.status === "pending" && !c.delivered && <span style={{ fontSize: 11, color: "#5C6773" }}>Will show up in your next workout</span>}
+                            {c.status === "pending" && c.delivered && <span style={{ fontSize: 11, color: "#5C6773" }}>Waiting for you to attempt it</span>}
                             {c.status === "completed" && (
                               <span style={{ fontSize: 11, fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
                                 {c.winnerUid === user.uid ? "You won" : c.winnerUid ? "You lost" : "Tied"} — your attempt: {c.opponentWeight}kg × {c.opponentReps}
                               </span>
                             )}
-                            {c.status === "declined" && <span style={{ fontSize: 11, color: "#5C6773" }}>Declined</span>}
+                            {c.status === "declined" && <span style={{ fontSize: 11, color: "#5C6773" }}>Ignored — declined</span>}
                           </div>
                         ))}
                       </div>
@@ -4608,7 +4576,7 @@ function AppContent({ user }) {
                                 {c.winnerUid === user.uid ? "You won" : c.winnerUid ? "They won" : "Tied"} — their attempt: {c.opponentWeight}kg × {c.opponentReps}
                               </span>
                             )}
-                            {c.status === "declined" && <span style={{ fontSize: 11, color: "#5C6773" }}>Declined</span>}
+                            {c.status === "declined" && <span style={{ fontSize: 11, color: "#5C6773" }}>Ignored — declined</span>}
                           </div>
                         ))}
                       </div>

@@ -350,7 +350,7 @@ export async function sendChallenge(toUid, toUsername, exercise, weight, reps, s
       challengerWeight: weight, challengerReps: reps, challengerScore: score,
       opponentWeight: null, opponentReps: null, opponentScore: null,
       status: "pending", winnerUid: null,
-      challengerClaimed: false, opponentClaimed: false,
+      challengerClaimed: false, opponentClaimed: false, delivered: false,
       createdAt: serverTimestamp(), date: dateISO,
     });
     return { error: null };
@@ -389,4 +389,11 @@ export async function submitChallengeAttempt(id, weight, reps, score, winnerUid)
 export async function markChallengerClaimed(id) {
   try { await updateDoc(doc(db, "challenges", id), { challengerClaimed: true }); }
   catch (e) { /* best-effort — will just retry claiming next refresh */ }
+}
+
+// Marks a challenge as injected into the recipient's workout session — it only
+// ever gets offered once, in their very next workout.
+export async function markChallengeDelivered(id) {
+  try { await updateDoc(doc(db, "challenges", id), { delivered: true }); }
+  catch (e) { /* best-effort */ }
 }
