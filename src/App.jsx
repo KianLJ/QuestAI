@@ -290,6 +290,22 @@ const XP_BASE = 100;
 const XP_INCREMENT = 15;
 const MISSED_PENALTY_PCT = 0.25;
 
+// Rough predicted duration for a workout plan: time spent actually performing each
+// set, plus rest between sets (not after the very last set of the whole workout).
+const SET_DURATION_SECONDS = 40;
+function estimateWorkoutMinutes(plan) {
+  if (!plan?.exercises?.length) return 0;
+  let totalSeconds = 0;
+  plan.exercises.forEach((pe) => {
+    const sets = Math.max(1, pe.sets || 3);
+    const rest = Math.max(0, pe.restSeconds || 90);
+    totalSeconds += sets * SET_DURATION_SECONDS + sets * rest;
+  });
+  const lastEx = plan.exercises[plan.exercises.length - 1];
+  totalSeconds -= Math.max(0, lastEx?.restSeconds || 0); // no rest needed after the final set
+  return Math.max(5, Math.round(totalSeconds / 60));
+}
+
 function habitTier(streakDays) {
   if (streakDays >= 66) return { label: "Diamond", color: "#4FA3C9" };
   if (streakDays >= 21) return { label: "Gold", color: "#C9A227" };
@@ -689,7 +705,7 @@ function InfoButton({ onClick, accent = "#C9A227", size = 13 }) {
   );
 }
 
-function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete }) {
+function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete, onSkip, onUnskip, onRemove }) {
   const [weight, setWeight] = useState(set.weight || "");
   const [reps, setReps] = useState(set.reps || "");
   if (set.completed) {
@@ -701,12 +717,23 @@ function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete }) {
       </div>
     );
   }
+  if (set.skipped) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px dashed #33414F", borderRadius: 8, padding: "7px 10px", opacity: 0.65 }}>
+        <span style={{ fontSize: 11, color: "#5C6773", width: 46 }}>Set {setNum}</span>
+        <span style={{ fontSize: 12, color: "#5C6773", flex: 1 }}>Skipped</span>
+        <button onClick={onUnskip} className="qlog-btn" style={{ fontSize: 10, background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "3px 8px", color: "#8A8578", cursor: "pointer" }}>Undo</button>
+      </div>
+    );
+  }
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
-      <span style={{ fontSize: 11, color: "#5C6773", width: 46, flexShrink: 0 }}>Set {setNum}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
+      <span style={{ fontSize: 11, color: "#5C6773", width: 40, flexShrink: 0 }}>Set {setNum}</span>
       <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="kg" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
       <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} placeholder="reps" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
-      <button onClick={() => onLog(weight, reps)} disabled={!weight || !reps} className="qlog-btn" style={{ width: 28, height: 28, minWidth: 28, borderRadius: "50%", border: `2px solid ${!weight || !reps ? "#33414F" : accent}`, background: "transparent", cursor: !weight || !reps ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}><Check size={13} color={!weight || !reps ? "#33414F" : accent} /></button>
+      <button onClick={() => onLog(weight, reps)} disabled={!weight || !reps} className="qlog-btn" style={{ width: 26, height: 26, minWidth: 26, borderRadius: "50%", border: `2px solid ${!weight || !reps ? "#33414F" : accent}`, background: "transparent", cursor: !weight || !reps ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={12} color={!weight || !reps ? "#33414F" : accent} /></button>
+      <button onClick={onSkip} title="Skip this set" aria-label="Skip this set" className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 3, flexShrink: 0, display: "flex" }}><ChevronRight size={15} /></button>
+      <button onClick={onRemove} title="Remove this set" aria-label="Remove this set" className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", padding: 3, flexShrink: 0, display: "flex" }}><Trash2 size={13} /></button>
     </div>
   );
 }
@@ -771,6 +798,7 @@ function AppContent({ user }) {
   const [historyExerciseId, setHistoryExerciseId] = useState(null); // set to view per-exercise progress
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
   const [sessionOverlayOpen, setSessionOverlayOpen] = useState(false);
+  const [expandedSessionExIdx, setExpandedSessionExIdx] = useState(null); // null = auto-follow the first incomplete exercise
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [, setWorkoutClockTick] = useState(0);
   const [aiEquipment, setAiEquipment] = useState([...EQUIPMENT_TYPES]);
@@ -1695,6 +1723,7 @@ function AppContent({ user }) {
       setChallenges((c) => ({ ...c, incoming: c.incoming.map((x) => x.id === pendingChallenge.id ? { ...x, delivered: true } : x) }));
     }
     setWorkoutSession({ planId: plan.id, planName: plan.name, startedAt: Date.now(), exercises, restTimer: null, setsXp: 0 });
+    setExpandedSessionExIdx(null);
     setSessionOverlayOpen(true);
   }
   function startRestTimer(seconds, exIdx, setIdx) {
@@ -1736,6 +1765,8 @@ function AppContent({ user }) {
     setWorkoutXpPop({ key: `${exIdx}-${setIdx}-${Date.now()}`, xp: setXpGain });
     setTimeout(() => setWorkoutXpPop(null), 900);
     if (loggedExercise?.isChallengeAddon && !loggedExercise.sets[setIdx]?.completed) resolveChallengeAttempt(loggedExercise, weight, reps);
+    // Auto-advance the focused exercise once every set in this one is done.
+    advanceIfExerciseNowDone(exIdx, loggedExercise && loggedExercise.sets.every((s, j) => j === setIdx || s.completed || s.skipped));
   }
   function uncompleteSet(exIdx, setIdx) {
     const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * effectiveXpPct);
@@ -1747,6 +1778,43 @@ function AppContent({ user }) {
       return { ...s, exercises, setsXp: Math.max(0, (s.setsXp || 0) - setXpGain) };
     });
     setTotalXP((t) => Math.max(0, t - setXpGain));
+  }
+  function advanceIfExerciseNowDone(exIdx, willBeDone) {
+    if (!willBeDone) return;
+    const nextIncompleteIdx = workoutSession.exercises.findIndex((e, i) => i !== exIdx && e.sets.some((s) => !s.completed && !s.skipped));
+    if (nextIncompleteIdx !== -1) setExpandedSessionExIdx(nextIncompleteIdx);
+  }
+  function skipSet(exIdx, setIdx) {
+    const ex = workoutSession?.exercises?.[exIdx];
+    setWorkoutSession((s) => {
+      if (!s) return s;
+      const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
+        ...e, sets: e.sets.map((st, j) => j !== setIdx ? st : { ...st, skipped: true }),
+      });
+      return { ...s, exercises };
+    });
+    advanceIfExerciseNowDone(exIdx, ex && ex.sets.every((s, j) => j === setIdx || s.completed || s.skipped));
+  }
+  function unskipSet(exIdx, setIdx) {
+    setWorkoutSession((s) => {
+      if (!s) return s;
+      const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
+        ...e, sets: e.sets.map((st, j) => j !== setIdx ? st : { ...st, skipped: false }),
+      });
+      return { ...s, exercises };
+    });
+  }
+  function removeSet(exIdx, setIdx) {
+    const ex = workoutSession?.exercises?.[exIdx];
+    setWorkoutSession((s) => {
+      if (!s) return s;
+      const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
+        ...e, sets: e.sets.filter((st, j) => j !== setIdx),
+      });
+      return { ...s, exercises };
+    });
+    const remaining = ex ? ex.sets.filter((s, j) => j !== setIdx) : [];
+    advanceIfExerciseNowDone(exIdx, remaining.length > 0 && remaining.every((s) => s.completed || s.skipped));
   }
   function finishWorkout() {
     if (!workoutSession) return;
@@ -2902,43 +2970,79 @@ function AppContent({ user }) {
             </div>
           )}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {(() => {
               const alreadyFlagged = workoutSession.exercises.some((e) => e.challengeFriendUid);
-              return workoutSession.exercises.map((ex, exIdx) => {
-                const canChallenge = !ex.isChallengeAddon && !ex.challengeFriendUid && !alreadyFlagged && !challengedToday && EXERCISE_CATALOGUE.some((e) => e.id === ex.exerciseId);
-                return (
-                 <div key={exIdx} className="qlog-card" style={{ background: ex.isChallengeAddon ? `${accent}14` : "#232E3D", border: `1px solid ${ex.isChallengeAddon ? accent : "#33414F"}`, borderRadius: 10, padding: "10px 12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
-                      <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
+              const firstIncompleteIdx = workoutSession.exercises.findIndex((e) => e.sets.some((s) => !s.completed && !s.skipped));
+              const activeExIdx = expandedSessionExIdx !== null ? expandedSessionExIdx : (firstIncompleteIdx === -1 ? workoutSession.exercises.length - 1 : firstIncompleteIdx);
+              const totalSets = workoutSession.exercises.reduce((sum, e) => sum + e.sets.length, 0);
+              const doneSets = workoutSession.exercises.reduce((sum, e) => sum + e.sets.filter((s) => s.completed).length, 0);
+              return (
+                <>
+                  <div style={{ marginBottom: 2 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8A8578", marginBottom: 4 }}>
+                      <span>{activeExIdx === -1 ? "Tap an exercise to open it" : `Exercise ${activeExIdx + 1} of ${workoutSession.exercises.length}`}</span>
+                      <span style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{doneSets}/{totalSets} sets</span>
                     </div>
-                    <div style={{ marginBottom: 8 }}>
-                      {ex.isChallengeAddon && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>⚔ Beat {ex.challengeFrom}'s {ex.challengeTargetWeight}kg × {ex.challengeTargetReps} — ignore to decline</span>
-                      )}
-                      {ex.challengeFriendUid && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>🏆 Challenging {ex.challengeFriendUsername} on this exercise</span>
-                      )}
-                      {canChallenge && (
-                        <button onClick={() => setChallengePickerExIdx(exIdx)} className="qlog-btn" style={{ fontSize: 9, fontWeight: 700, color: accent, background: accent + "18", border: `1px solid ${accent}44`, borderRadius: 10, padding: "2px 8px", cursor: "pointer" }}>Challenge?</button>
-                      )}
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      {ex.sets.map((st, setIdx) => (
-                        <WorkoutSetRow
-                          key={setIdx}
-                          setNum={setIdx + 1}
-                          set={st}
-                          accent={accent}
-                          onLog={(weight, reps) => logSet(exIdx, setIdx, weight, reps, ex.restSeconds)}
-                          onUncomplete={() => uncompleteSet(exIdx, setIdx)}
-                        />
-                      ))}
+                    <div style={{ height: 5, background: "#232E3D", borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${totalSets ? (doneSets / totalSets) * 100 : 0}%`, background: accent, borderRadius: 3, transition: "width 0.3s ease" }} />
                     </div>
                   </div>
-                );
-              });
+                  {workoutSession.exercises.map((ex, exIdx) => {
+                    const isActive = exIdx === activeExIdx;
+                    const exDone = ex.sets.filter((s) => s.completed).length;
+                    const exComplete = ex.sets.every((s) => s.completed || s.skipped);
+                    const canChallenge = !ex.isChallengeAddon && !ex.challengeFriendUid && !alreadyFlagged && !challengedToday && EXERCISE_CATALOGUE.some((e) => e.id === ex.exerciseId);
+
+                    if (!isActive) {
+                      return (
+                        <button key={exIdx} onClick={() => setExpandedSessionExIdx(exIdx)} className="qlog-btn qlog-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: ex.isChallengeAddon ? `${accent}14` : "#1F2836", border: `1px solid ${exComplete ? "#4C9A6A" : ex.isChallengeAddon ? accent : "#2C3947"}`, borderRadius: 8, padding: "9px 12px", cursor: "pointer", textAlign: "left" }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: exComplete ? "#8A8578" : "#EDE4D3", textDecoration: exComplete ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ex.name}</span>
+                          <span style={{ fontSize: 10, color: exComplete ? "#4C9A6A" : "#5C6773", flexShrink: 0, fontFamily: "ui-monospace, Menlo, monospace" }}>{exComplete ? "✓ Done" : `${exDone}/${ex.sets.length}`}</span>
+                        </button>
+                      );
+                    }
+
+                    return (
+                      <div key={exIdx} className="qlog-card" style={{ background: ex.isChallengeAddon ? `${accent}14` : "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 10, padding: "10px 12px" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
+                          <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
+                        </div>
+                        <div style={{ marginBottom: 8 }}>
+                          {ex.isChallengeAddon && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>⚔ Beat {ex.challengeFrom}'s {ex.challengeTargetWeight}kg × {ex.challengeTargetReps} — ignore to decline</span>
+                          )}
+                          {ex.challengeFriendUid && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>🏆 Challenging {ex.challengeFriendUsername} on this exercise</span>
+                          )}
+                          {canChallenge && (
+                            <button onClick={() => setChallengePickerExIdx(exIdx)} className="qlog-btn" style={{ fontSize: 9, fontWeight: 700, color: accent, background: accent + "18", border: `1px solid ${accent}44`, borderRadius: 10, padding: "2px 8px", cursor: "pointer" }}>Challenge?</button>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {ex.sets.map((st, setIdx) => (
+                            <WorkoutSetRow
+                              key={setIdx}
+                              setNum={setIdx + 1}
+                              set={st}
+                              accent={accent}
+                              onLog={(weight, reps) => logSet(exIdx, setIdx, weight, reps, ex.restSeconds)}
+                              onUncomplete={() => uncompleteSet(exIdx, setIdx)}
+                              onSkip={() => skipSet(exIdx, setIdx)}
+                              onUnskip={() => unskipSet(exIdx, setIdx)}
+                              onRemove={() => removeSet(exIdx, setIdx)}
+                            />
+                          ))}
+                        </div>
+                        {workoutSession.exercises.length > 1 && (
+                          <button onClick={() => setExpandedSessionExIdx(-1)} className="qlog-btn" style={{ marginTop: 8, width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Collapse</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              );
             })()}
           </div>
 
@@ -3797,7 +3901,7 @@ function AppContent({ user }) {
                     <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                         <span style={{ fontSize: 14, fontWeight: 700 }}>{todayPlan.name}</span>
-                        <span style={{ fontSize: 10, color: "#5C6773" }}>{todayPlan.exercises.length} exercises</span>
+                        <span style={{ fontSize: 10, color: "#5C6773" }}>{todayPlan.exercises.length} exercises · ~{estimateWorkoutMinutes(todayPlan)} min</span>
                       </div>
                       {muscleVolume.length > 0 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
@@ -3842,7 +3946,7 @@ function AppContent({ user }) {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <button onClick={() => setEditingPlanId(isEditing ? null : plan.id)} className="qlog-btn" style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", flex: 1, padding: 0 }}>
                           <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{plan.name}</span>
-                          <span style={{ fontSize: 10, color: "#5C6773", marginLeft: 8 }}>{plan.exercises.length} exercises</span>
+                          <span style={{ fontSize: 10, color: "#5C6773", marginLeft: 8 }}>{plan.exercises.length} exercises · ~{estimateWorkoutMinutes(plan)} min</span>
                         </button>
                         <button onClick={() => deleteWorkoutPlan(plan.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={13} /></button>
                       </div>
@@ -4434,7 +4538,7 @@ function AppContent({ user }) {
                       {(friend.workoutPlans || []).map((plan) => (
                         <div key={plan.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#EDE4D3" }}>
                           <span>{plan.name}</span>
-                          <span style={{ color: "#5C6773" }}>{plan.exercises.length} exercises</span>
+                          <span style={{ color: "#5C6773" }}>{plan.exercises.length} exercises · ~{estimateWorkoutMinutes(plan)} min</span>
                         </div>
                       ))}
                     </div>
