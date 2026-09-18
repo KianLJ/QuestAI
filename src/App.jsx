@@ -90,33 +90,85 @@ function getExerciseRankProfile(ex) {
     const growth = hard ? 1.24 : 1.19;
     return { mode: "reps", base, growth };
   }
-  const compound = (ex.muscleGroups?.length || 1) >= 3;
+  // Goblet squats are capped by how much you can hold at your chest (grip/core/arms),
+  // not by leg strength — a strong lifter still can't goblet squat anywhere near what
+  // they back squat, so it needs its own low ceiling instead of sharing the quads
+  // compound *or* isolation table (both are calibrated around back-loaded/machine lifts).
+  if (/goblet/.test(nameLower)) {
+    return { mode: "1rm", base: 13.3, growth: 1.095, weightMultiplier: 1 };
+  }
+  // muscleGroups tagging is inconsistent (e.g. Dumbbell Shoulder Press is only
+  // tagged with 2 groups even though it's genuinely a multi-joint compound lift),
+  // so classify primarily off the movement pattern in the name, falling back to
+  // the muscle-group count only for exercises that match neither.
+  const isolationKeyword = /curl|extension|\bflyes?\b|raise|kickback|shrug|crunch|twist|pushdown|pull-?over/.test(nameLower);
+  const compoundKeyword = /squat|deadlift|lunge|press|\brow\b|thrust|pull-?up|chin-?up|\bdip\b|clean|snatch/.test(nameLower);
+  const compound = isolationKeyword ? false : (compoundKeyword || (ex.muscleGroups?.length || 1) >= 3);
   const BODYPART_BASE = { chest: 30, back: 32, shoulders: 16, quads: 40, hamstrings: 28, glutes: 32, biceps: 8, triceps: 10, calves: 18, abs: 6, forearms: 6, traps: 16, cardio: 6 };
-  const base = Math.max(3, (BODYPART_BASE[ex.primaryMuscle] || 15) * (compound ? 1 : 0.55));
-  const growth = compound ? 1.155 : 1.135;
-  return { mode: "1rm", base, growth };
+  // Isolation lifts have a much narrower beginner-to-elite load range than
+  // compound lifts, so they get their own base weights (beginner 10RM-ish
+  // totals) and a shallower growth curve rather than just derating BODYPART_BASE.
+  const ISOLATION_BASE = { chest: 16, back: 20, shoulders: 8, quads: 33.3, hamstrings: 26.7, glutes: 20, biceps: 16, triceps: 16, calves: 53.3, abs: 20, forearms: 13.3, traps: 40, cardio: 6 };
+  const base = compound ? Math.max(3, BODYPART_BASE[ex.primaryMuscle] || 15) : Math.max(3, ISOLATION_BASE[ex.primaryMuscle] || 12);
+  const growth = compound ? 1.155 : 1.095;
+  // Dumbbell exercises worked with one dumbbell per hand move double the logged
+  // weight (e.g. 7.5kg in each hand = 15kg total) — unilateral/single-implement
+  // dumbbell moves (goblet squat, one-arm row, concentration curl, ...) don't.
+  const weightMultiplier = ex.equipment === "dumbbell" && ex.bilateral ? 2 : 1;
+  return { mode: "1rm", base, growth, weightMultiplier };
 }
 
 function computeSetScore(profile, weight, reps) {
   if (!profile) return 0;
   const w = Number(weight) || 0, r = Number(reps) || 0;
   if (r <= 0) return 0;
-  if (profile.mode === "reps") return r + w * 0.5;
+  if (profile.mode === "reps") return r + w * (profile.weightMultiplier || 1) * 0.5;
   if (w <= 0) return 0;
-  return w * (1 + r / 30); // Epley estimated 1RM
+  return w * (profile.weightMultiplier || 1) * (1 + r / 30); // Epley estimated 1RM
 }
 
-function bestScoreForExercise(exerciseId, history, profile) {
-  let best = 0;
+function bestSetForExercise(exerciseId, history, profile) {
+  let best = { score: 0, weight: 0, reps: 0 };
   for (const h of history || []) {
     const entry = h.exercises?.find((e) => e.exerciseId === exerciseId);
     if (!entry) continue;
     for (const s of entry.sets || []) {
       const score = computeSetScore(profile, s.weight, s.reps);
-      if (score > best) best = score;
+      if (score > best.score) best = { score, weight: Number(s.weight) || 0, reps: Number(s.reps) || 0 };
     }
   }
   return best;
+}
+
+function bestScoreForExercise(exerciseId, history, profile) {
+  return bestSetForExercise(exerciseId, history, profile).score;
+}
+
+// A short, actionable "what to actually do" hint for the next rank, since a bare
+// percentage doesn't tell you what to lift/do — derives it from the best set that
+// earned your current score (same reps for weight-based lifts, same weight for
+// reps-based ones), so it's a concrete, realistic next target.
+function nextRankGoalText(profile, idx, bestSet, timed) {
+  if (!profile) return null;
+  const nextThreshold = rankThreshold(profile, idx + 1);
+  const mult = profile.weightMultiplier || 1;
+  if (profile.mode === "reps") {
+    const w = bestSet?.weight || 0;
+    let neededReps = Math.max(1, Math.ceil(nextThreshold - w * mult * 0.5));
+    // Guard against rounding landing back on (or under) what was already done,
+    // which reads as "that's what I just did" even though it fell just short.
+    if (neededReps <= (bestSet?.reps || 0)) neededReps = (bestSet?.reps || 0) + 1;
+    return timed ? `${neededReps}s to rank up` : `${neededReps} reps to rank up`;
+  }
+  const r = bestSet?.reps > 0 ? bestSet.reps : 8;
+  const neededWeight = nextThreshold / (mult * (1 + r / 30));
+  if (!(neededWeight > 0)) return null;
+  // Round UP (not to nearest) so the suggestion is never the exact weight
+  // already lifted — rounding to nearest can land back on the current best
+  // when the real gap is only a fraction of a kg, which reads as a no-op.
+  let rounded = Math.ceil(neededWeight * 2) / 2;
+  if (rounded <= (bestSet?.weight || 0)) rounded = (bestSet?.weight || 0) + 0.5;
+  return `~${rounded}kg × ${r} reps to rank up`;
 }
 
 // From Master III (idx 18) onward, thresholds grow at only 10% of the normal rate —
@@ -151,16 +203,24 @@ function rankProgress(score, profile, idx) {
   return Math.max(0, Math.min(1, (score - cur) / (next - cur)));
 }
 
+// Rounds a not-yet-ranked-up progress fraction for display, capped at 99% —
+// rounding straight to 100% while still shy of the actual threshold (e.g. 99.6%)
+// reads as a contradiction ("100% but still the same rank").
+function pctToNextRank(progress) {
+  return Math.min(99, Math.round((progress || 0) * 100));
+}
+
 function computeExerciseRankRows(history, customExercises) {
   const attemptedIds = [...new Set((history || []).flatMap((h) => (h.exercises || []).map((e) => e.exerciseId)))];
   return attemptedIds.map((id) => {
     const ex = findExercise(id, customExercises);
     const profile = getExerciseRankProfile(ex);
-    const score = bestScoreForExercise(id, history, profile);
+    const bestSet = bestSetForExercise(id, history, profile);
+    const score = bestSet.score;
     const idx = rankIndexForScore(score, profile);
     const info = rankInfo(idx);
     const progress = rankProgress(score, profile, idx);
-    return { id, ex, profile, score, idx, info, progress };
+    return { id, ex, profile, score, idx, info, progress, bestSet };
   }).sort((a, b) => b.idx - a.idx || (a.ex?.name || "").localeCompare(b.ex?.name || ""));
 }
 
@@ -169,14 +229,19 @@ function computeExerciseRankRows(history, customExercises) {
 // a small, capped bonus for having ranked in a wide variety of exercises.
 function computeOverallRank(rows) {
   if (!rows || rows.length === 0) return null;
-  const continuous = rows.map((r) => r.idx + r.progress).sort((a, b) => b - a);
-  const top = continuous.slice(0, Math.min(8, continuous.length));
-  const avg = top.reduce((s, v) => s + v, 0) / top.length;
+  const ranked = [...rows].sort((a, b) => (b.idx + b.progress) - (a.idx + a.progress));
+  const top = ranked.slice(0, Math.min(8, ranked.length));
+  const avg = top.reduce((s, r) => s + r.idx + r.progress, 0) / top.length;
   const breadthBonus = Math.min(rows.length, 15) * 0.08;
   const combined = Math.max(0, Math.min(TOTAL_RANKS - 0.001, avg + breadthBonus));
   const idx = Math.min(TOTAL_RANKS - 1, Math.floor(combined));
   const progress = Math.max(0, Math.min(1, combined - idx));
-  return { idx, progress, info: rankInfo(idx), exerciseCount: rows.length };
+  // Since every one of the top 8 moves the average by the same amount per point of
+  // rank gained, the fastest lever isn't the weakest lift — it's whichever of them
+  // is already closest to its own next rank (highest progress within its rank).
+  const climbable = top.filter((r) => !r.info.isMax);
+  const nearest = climbable.length > 0 ? [...climbable].sort((a, b) => b.progress - a.progress)[0] : null;
+  return { idx, progress, info: rankInfo(idx), exerciseCount: rows.length, nearest };
 }
 // ---- Enemy SVG silhouettes ----
 // ---- Aura particle component ----
@@ -603,12 +668,12 @@ function WeekShiftModal({ weekDates, shifts, accent, themePersonality, onSave, o
       onClick={onClose}>
       <div style={{ background: themePersonality.cardBase, border: `1px solid ${accent}55`, borderRadius: 16, padding: 20, width: "100%", maxWidth: 380, maxHeight: "90vh", overflowY: "auto" }}
         onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Set Week Shifts</h3>
-        <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 16px" }}>Toggle days you're working and set times.</p>
+        <h3 style={{ margin: "0 0 4px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Set Week Shifts</h3>
+        <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 16px" }}>Toggle days you're working and set times.</p>
         {rows.map((row, i) => (
           <div key={row.date} style={{ marginBottom: 10, background: row.enabled ? accent + "10" : "#141C27", border: `1px solid ${row.enabled ? accent + "44" : "#2C3947"}`, borderRadius: 10, padding: "10px 12px", transition: "all 0.15s" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: row.enabled ? 10 : 0 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: row.enabled ? accent : "#8A8578" }}>
+              <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: row.enabled ? accent : "#8A8578" }}>
                 {parseLocalDate(row.date).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })}
               </span>
               <div onClick={() => setRows((r) => r.map((x, j) => j === i ? { ...x, enabled: !x.enabled } : x))}
@@ -619,16 +684,16 @@ function WeekShiftModal({ weekDates, shifts, accent, themePersonality, onSave, o
             {row.enabled && (
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>Start</p>
+                  <p style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 3px" }}>Start</p>
                   <input type="time" value={row.startTime}
                     onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, startTime: e.target.value } : x))}
-                    style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
+                    style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 10, color: "#5C6773", margin: "0 0 3px" }}>End</p>
+                  <p style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 3px" }}>End</p>
                   <input type="time" value={row.endTime}
                     onChange={(e) => setRows((r) => r.map((x, j) => j === i ? { ...x, endTime: e.target.value } : x))}
-                    style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: 12 }} />
+                    style={{ width: "100%", boxSizing: "border-box", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 4px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
                 </div>
               </div>
             )}
@@ -636,11 +701,11 @@ function WeekShiftModal({ weekDates, shifts, accent, themePersonality, onSave, o
         ))}
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           <button onClick={save} className="qlog-btn"
-            style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>
+            style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>
             Save Shifts
           </button>
           <button onClick={onClose} className="qlog-btn"
-            style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "11px 14px", fontSize: 13, color: "#8A8578", cursor: "pointer" }}>
+            style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "11px 14px", fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>
             Cancel
           </button>
         </div>
@@ -654,7 +719,7 @@ function SettingsSection({ title, defaultOpen = false, children }) {
   return (
     <div style={{ border: "1px solid #33414F", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="qlog-btn" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "none", padding: "12px 14px", cursor: "pointer" }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", letterSpacing: 0.5 }}>{title}</span>
+        <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", letterSpacing: 0.5 }}>{title}</span>
         <ChevronRight size={14} color="#8A8578" style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s ease" }} />
       </button>
       {open && <div style={{ padding: 14 }}>{children}</div>}
@@ -705,36 +770,64 @@ function InfoButton({ onClick, accent = "#C9A227", size = 13 }) {
   );
 }
 
-function WorkoutSetRow({ setNum, set, accent, onLog, onUncomplete, onSkip, onUnskip, onRemove }) {
+function WorkoutSetRow({ setNum, set, accent, timed, onLog, onUncomplete, onSkip, onUnskip, onRemove }) {
   const [weight, setWeight] = useState(set.weight || "");
   const [reps, setReps] = useState(set.reps || "");
   if (set.completed) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
         <button onClick={onUncomplete} className="qlog-btn" style={{ width: 18, height: 18, minWidth: 18, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={10} color="#141C27" /></button>
-        <span style={{ fontSize: 11, color: "#5C6773", width: 46 }}>Set {setNum}</span>
-        <span style={{ fontSize: 13, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{set.weight || 0} × {set.reps || 0}</span>
+        <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", width: 46 }}>Set {setNum}</span>
+        <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{timed ? `${set.reps || 0}s${set.weight ? ` @ ${set.weight}kg` : ""}` : `${set.weight || 0} × ${set.reps || 0}`}</span>
       </div>
     );
   }
   if (set.skipped) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px dashed #33414F", borderRadius: 8, padding: "7px 10px", opacity: 0.65 }}>
-        <span style={{ fontSize: 11, color: "#5C6773", width: 46 }}>Set {setNum}</span>
-        <span style={{ fontSize: 12, color: "#5C6773", flex: 1 }}>Skipped</span>
-        <button onClick={onUnskip} className="qlog-btn" style={{ fontSize: 10, background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "3px 8px", color: "#8A8578", cursor: "pointer" }}>Undo</button>
+        <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", width: 46 }}>Set {setNum}</span>
+        <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", flex: 1 }}>Skipped</span>
+        <button onClick={onUnskip} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "3px 8px", color: "#8A8578", cursor: "pointer" }}>Undo</button>
       </div>
     );
   }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
-      <span style={{ fontSize: 11, color: "#5C6773", width: 40, flexShrink: 0 }}>Set {setNum}</span>
-      <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="kg" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
-      <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} placeholder="reps" style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
-      <button onClick={() => onLog(weight, reps)} disabled={!weight || !reps} className="qlog-btn" style={{ width: 26, height: 26, minWidth: 26, borderRadius: "50%", border: `2px solid ${!weight || !reps ? "#33414F" : accent}`, background: "transparent", cursor: !weight || !reps ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={12} color={!weight || !reps ? "#33414F" : accent} /></button>
+      <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", width: 40, flexShrink: 0 }}>Set {setNum}</span>
+      <input type="number" inputMode="decimal" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder={timed ? "kg (optional)" : "kg"} style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
+      <input type="number" inputMode="numeric" value={reps} onChange={(e) => setReps(e.target.value)} placeholder={timed ? "sec" : "reps"} style={{ flex: 1, minWidth: 0, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
+      <button onClick={() => onLog(weight, reps)} disabled={(!timed && !weight) || !reps} className="qlog-btn" style={{ width: 26, height: 26, minWidth: 26, borderRadius: "50%", border: `2px solid ${(!timed && !weight) || !reps ? "#33414F" : accent}`, background: "transparent", cursor: (!timed && !weight) || !reps ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Check size={12} color={(!timed && !weight) || !reps ? "#33414F" : accent} /></button>
       <button onClick={onSkip} title="Skip this set" aria-label="Skip this set" className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 3, flexShrink: 0, display: "flex" }}><ChevronRight size={15} /></button>
       <button onClick={onRemove} title="Remove this set" aria-label="Remove this set" className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", padding: 3, flexShrink: 0, display: "flex" }}><Trash2 size={13} /></button>
     </div>
+  );
+}
+
+function OverallRankCard({ overall, rankBonusPct, onClick }) {
+  const shown = overall || { info: rankInfo(-1), progress: 0, exerciseCount: 0 };
+  return (
+    <button onClick={onClick} className="qlog-btn" style={{ width: "100%", textAlign: "left", cursor: "pointer", background: `linear-gradient(135deg, ${shown.info.color}22, #1F2836)`, border: `1px solid ${shown.info.color}66`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
+      <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <span style={{ fontSize: "calc(20px * var(--ui-scale, 1))", fontWeight: 700, color: shown.info.color, fontFamily: "Georgia, serif" }}>{shown.info.label}</span>
+        {shown.info.unranked ? <IconShield size={22} color={shown.info.color} /> : <RankShieldIcon tierIndex={shown.info.tierIdx} numeral={shown.info.sub} color={shown.info.color} size={26} />}
+      </div>
+      <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${shown.info.unranked ? 0 : shown.info.isMax ? 100 : shown.progress * 100}%`, background: shown.info.color, borderRadius: 4 }} />
+      </div>
+      <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 4 }}>
+        {shown.info.unranked ? "Complete a workout to start earning ranks" : shown.info.isMax ? "Max rank reached" : `${pctToNextRank(shown.progress)}% of the way to next rank`}
+        {!shown.info.unranked && ` · averaged from your top ${Math.min(8, shown.exerciseCount)} ranked exercise${Math.min(8, shown.exerciseCount) === 1 ? "" : "s"}`}
+      </div>
+      {!shown.info.unranked && shown.nearest && (
+        <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: shown.info.color, marginTop: 4 }}>
+          Fastest lever: {shown.nearest.ex?.name || "?"} is {pctToNextRank(shown.nearest.progress)}% to its own next rank
+        </div>
+      )}
+      {!shown.info.unranked && rankBonusPct > 0 && (
+        <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: shown.info.color, marginTop: 6 }}>+{Math.round(rankBonusPct * 100)}% XP · +{Math.round(rankBonusPct * 100)}% Gold on everything</div>
+      )}
+    </button>
   );
 }
 
@@ -1225,6 +1318,11 @@ function AppContent({ user }) {
     const acquire = async () => {
       try {
         lock = await navigator.wakeLock.request("screen");
+        // The OS/browser can silently release the lock (e.g. tab backgrounded)
+        // without us calling release() ourselves — without this listener,
+        // `lock` stays a stale released sentinel and onVisibility's `!lock`
+        // check never re-fires, so the screen never re-locks on resume.
+        lock.addEventListener("release", () => { lock = null; });
       } catch (e) {
         console.warn("wake lock failed:", e);
       }
@@ -1249,6 +1347,10 @@ function AppContent({ user }) {
     const acquire = async () => {
       try {
         lock = await navigator.wakeLock.request("screen");
+        // See matching comment on the focus-timer wake lock above — without
+        // this, minimizing/backgrounding the workout releases the OS lock but
+        // leaves our `lock` var non-null, so resuming never re-requests it.
+        lock.addEventListener("release", () => { lock = null; });
       } catch (e) {
         console.warn("wake lock failed:", e);
       }
@@ -2415,7 +2517,7 @@ function AppContent({ user }) {
           </button>
           <span
             onClick={() => setQuestDetailFor(q.id)}
-            style={{ fontSize: 11, lineHeight: 1.2, color: isMissed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 6px" }}
+            style={{ fontSize: "calc(11px * var(--ui-scale, 1))", lineHeight: 1.2, color: isMissed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 6px" }}
             title={isMissed ? `Missed original due date — XP reduced ${Math.round(MISSED_PENALTY_PCT * 100)}%` : undefined}>
             {isMissed ? "❄ " : ""}{q.title}
           </span>
@@ -2439,9 +2541,9 @@ function AppContent({ user }) {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", borderRight: "1px solid #2C3947" }}>
         <div style={{ padding: "6px 4px", textAlign: "center", borderBottom: "1px solid #2C3947", background: isSelected ? accent + "22" : "transparent" }}>
           <div onClick={() => { setSelectedDate(date); if (calView === "month") setCalView("day"); }} style={{ cursor: "pointer" }}>
-            <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{dayName}</div>
+            <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{dayName}</div>
             <div style={{ width: 24, height: 24, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto 0" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: isToday ? "#1B2430" : isCurrentMonth ? "#EDE4D3" : "#4A5563" }}>{dayNum}</span>
+              <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: isToday ? "#1B2430" : isCurrentMonth ? "#EDE4D3" : "#4A5563" }}>{dayNum}</span>
             </div>
           </div>
 
@@ -2451,8 +2553,8 @@ function AppContent({ user }) {
           {dayShifts.map((s) => (
             <div key={s.id}
               style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 4, padding: "4px 5px", marginBottom: 3 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.3 }}>Shift</div>
-              <div style={{ fontSize: 9, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>
+              <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.3 }}>Shift</div>
+              <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>
                 {formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}
               </div>
             </div>
@@ -2500,40 +2602,40 @@ function AppContent({ user }) {
           {editing ? (
             /* ---- Edit mode ---- */
             <div>
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Task name:</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Task name:</p>
               <input
                 autoFocus
                 value={editTitle}
                 onChange={(e) => setEditTitle(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveEdit()}
-                style={{ width: "100%", marginBottom: 12, background: "#141C27", border: `1px solid ${accent}`, borderRadius: 8, padding: "9px 11px", color: "#EDE4D3", fontSize: 14 }}
+                style={{ width: "100%", marginBottom: 12, background: "#141C27", border: `1px solid ${accent}`, borderRadius: 8, padding: "9px 11px", color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }}
               />
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Difficulty:</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 6px" }}>Difficulty:</p>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
                 {themedDifficulties.map((d) => (
                   <button key={d.key} onClick={() => setEditDiff(d.key)} className="qlog-btn"
-                    style={{ fontSize: 11, fontWeight: 700, padding: "5px 10px", borderRadius: 8, border: `1.5px solid ${editDiff === d.key ? d.color : "#33414F"}`, background: editDiff === d.key ? d.color + "22" : "transparent", color: editDiff === d.key ? d.color : "#8A8578", cursor: "pointer" }}>
+                    style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, padding: "5px 10px", borderRadius: 8, border: `1.5px solid ${editDiff === d.key ? d.color : "#33414F"}`, background: editDiff === d.key ? d.color + "22" : "transparent", color: editDiff === d.key ? d.color : "#8A8578", cursor: "pointer" }}>
                     {d.label}
                   </button>
                 ))}
               </div>
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Date:</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Date:</p>
               <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)}
-                style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 11px", color: "#EDE4D3", fontSize: 13 }} />
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Focus timer (minutes):</p>
+                style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 11px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Focus timer (minutes):</p>
               <input
                 type="number" min={1} max={240} value={editMins}
                 onChange={(e) => setEditMins(e.target.value)}
                 placeholder="Leave blank to keep current"
-                style={{ width: "100%", marginBottom: 16, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 11px", color: "#EDE4D3", fontSize: 13 }}
+                style={{ width: "100%", marginBottom: 16, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 11px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }}
               />
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={saveEdit} className="qlog-btn"
-                  style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>
+                  style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>
                   Save
                 </button>
                 <button onClick={() => setEditing(false)} className="qlog-btn"
-                  style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#8A8578", cursor: "pointer" }}>
+                  style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>
                   Cancel
                 </button>
               </div>
@@ -2550,16 +2652,16 @@ function AppContent({ user }) {
                   </button>
                 )}
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600, textDecoration: q.completed ? "line-through" : "none", marginBottom: 4 }}>{q.title}</div>
+                  <div style={{ fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 600, textDecoration: q.completed ? "line-through" : "none", marginBottom: 4 }}>{q.title}</div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ fontSize: 11, color: diff.color, fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{diff.label.toUpperCase()} · {q.missedPenalty ? Math.round(q.xp * (1 - MISSED_PENALTY_PCT)) : q.xp} XP</span>
-                    {q.estMinutes && <span style={{ fontSize: 11, color: "#5C6773", fontFamily: "ui-monospace, Menlo, monospace" }}>~{q.estMinutes}m</span>}
+                    <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: diff.color, fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{diff.label.toUpperCase()} · {q.missedPenalty ? Math.round(q.xp * (1 - MISSED_PENALTY_PCT)) : q.xp} XP</span>
+                    {q.estMinutes && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", fontFamily: "ui-monospace, Menlo, monospace" }}>~{q.estMinutes}m</span>}
                     {q.recurring && <Repeat size={11} color="#5C6773" />}
-                    {!q.completed && q.missedPenalty && <span style={{ fontSize: 11, color: "#8A2E44", fontWeight: 700 }}>❄ Missed (-{Math.round(MISSED_PENALTY_PCT * 100)}% XP)</span>}
-                    {isBossCard && <span style={{ fontSize: 11, color: "#8A5FBF", fontWeight: 700 }}>👑 Boss</span>}
+                    {!q.completed && q.missedPenalty && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A2E44", fontWeight: 700 }}>❄ Missed (-{Math.round(MISSED_PENALTY_PCT * 100)}% XP)</span>}
+                    {isBossCard && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A5FBF", fontWeight: 700 }}>👑 Boss</span>}
                   </div>
-                  {q.reason && <div style={{ fontSize: 11, color: "#5C6773", marginTop: 4, fontStyle: "italic" }}>{q.reason}</div>}
-                  <div style={{ fontSize: 11, color: "#5C6773", marginTop: 4 }}>
+                  {q.reason && <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 4, fontStyle: "italic" }}>{q.reason}</div>}
+                  <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 4 }}>
                     {parseLocalDate(q.date).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
                   </div>
                 </div>
@@ -2568,21 +2670,21 @@ function AppContent({ user }) {
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {!q.completed && (
                   <>
-                    <button onClick={() => { openFocus(q); setQuestDetailFor(null); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: `1px solid ${accent}`, background: "transparent", color: accent, cursor: "pointer" }}><Timer size={13} /> Focus</button>
+                    <button onClick={() => { openFocus(q); setQuestDetailFor(null); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: `1px solid ${accent}`, background: "transparent", color: accent, cursor: "pointer" }}><Timer size={13} /> Focus</button>
                     {(q.difficulty === "hard" || q.difficulty === "epic") && !isBossCard && (
-                      <button onClick={() => { setWeeklyBossId(q.id); setQuestDetailFor(null); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #8A5FBF", background: "transparent", color: "#8A5FBF", cursor: "pointer" }}><Crown size={13} /> Make Boss</button>
+                      <button onClick={() => { setWeeklyBossId(q.id); setQuestDetailFor(null); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #8A5FBF", background: "transparent", color: "#8A5FBF", cursor: "pointer" }}><Crown size={13} /> Make Boss</button>
                     )}
                     {q.difficulty === "epic" && (
                       splittingId === q.id
-                        ? <button disabled style={{ fontSize: 12, padding: "8px 12px", borderRadius: 8, border: "1px solid #33414F", background: "transparent", color: "#5C6773" }}><Loader2 size={13} className="spin" /></button>
-                        : <button onClick={() => { splitEpicQuest(q); setQuestDetailFor(null); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #33414F", background: "transparent", color: "#8A8578", cursor: "pointer" }}><Scissors size={13} /> Split</button>
+                        ? <button disabled style={{ fontSize: "calc(12px * var(--ui-scale, 1))", padding: "8px 12px", borderRadius: 8, border: "1px solid #33414F", background: "transparent", color: "#5C6773" }}><Loader2 size={13} className="spin" /></button>
+                        : <button onClick={() => { splitEpicQuest(q); setQuestDetailFor(null); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #33414F", background: "transparent", color: "#8A8578", cursor: "pointer" }}><Scissors size={13} /> Split</button>
                     )}
-                    <button onClick={() => setEditing(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #33414F", background: "transparent", color: "#8A8578", cursor: "pointer" }}><Edit2 size={13} /> Edit</button>
+                    <button onClick={() => setEditing(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #33414F", background: "transparent", color: "#8A8578", cursor: "pointer" }}><Edit2 size={13} /> Edit</button>
                   </>
                 )}
-                <button onClick={() => deleteQuest(q.id)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #8A2E44", background: "transparent", color: "#8A2E44", cursor: "pointer" }}><Trash2 size={13} /> Delete</button>
+                <button onClick={() => deleteQuest(q.id)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "1px solid #8A2E44", background: "transparent", color: "#8A2E44", cursor: "pointer" }}><Trash2 size={13} /> Delete</button>
               </div>
-              {q.completed && <p style={{ fontSize: 11, color: "#5C6773", margin: "10px 0 0" }}>Tap ✓ to undo this completion.</p>}
+              {q.completed && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "10px 0 0" }}>Tap ✓ to undo this completion.</p>}
             </>
           )}
         </div>
@@ -2642,9 +2744,20 @@ function AppContent({ user }) {
 
   // ---- Render ----
   return (
-    <div className="safe-top" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84, "--accent-card-hover": accent + "40" }}>
+    <div className="safe-top qlog-app-shell" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84, "--accent-card-hover": accent + "40" }}>
       <style>{`
         * { box-sizing: border-box; scrollbar-width: none; -ms-overflow-style: none; }
+        /* The UI's font sizes are all small mobile-first px values, which read fine
+           on a phone but are hard to read at PC viewing distance. Every fontSize is
+           expressed as calc(Npx * var(--ui-scale, 1)) so real font sizes grow on
+           wider screens (crisp, normal text layout) instead of a blanket CSS zoom,
+           which visibly distorts font rendering at fractional scales. */
+        @media (min-width: 820px) {
+          .qlog-app-shell { --ui-scale: 1.15; }
+        }
+        @media (min-width: 1280px) {
+          .qlog-app-shell { --ui-scale: 1.3; }
+        }
         *::-webkit-scrollbar { display: none; width: 0; height: 0; }
         .qlog-btn { transition: transform 0.12s ease, filter 0.15s ease; }
         .qlog-btn:active { transform: scale(0.96); }
@@ -2690,12 +2803,12 @@ function AppContent({ user }) {
       {/* XP pop with gear bonus breakdown */}
       {xpPop && (
         <div className="xp-pop" style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", zIndex: 65, background: "#232E3D", border: `1px solid ${accent}`, borderRadius: 10, padding: "8px 16px", display: "flex", alignItems: "center", gap: 8, boxShadow: "0 4px 20px rgba(0,0,0,0.5)", whiteSpace: "nowrap" }}>
-          <span style={{ fontWeight: 700, fontSize: 14, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{xpPop.xp} XP</span>
+          <span style={{ fontWeight: 700, fontSize: "calc(14px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{xpPop.xp} XP</span>
           {xpPop.gearXP > 0 && (
-            <span style={{ fontSize: 11, color: RARITIES.epic.color, fontFamily: "ui-monospace, Menlo, monospace" }}>⚔ +{xpPop.gearXP} ({Math.round(xpPop.gearPct * 100)}%)</span>
+            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: RARITIES.epic.color, fontFamily: "ui-monospace, Menlo, monospace" }}>⚔ +{xpPop.gearXP} ({Math.round(xpPop.gearPct * 100)}%)</span>
           )}
           {xpPop.activeSets?.length > 0 && (
-            <span style={{ fontSize: 11, color: RARITIES.legendary.color, fontFamily: "ui-monospace, Menlo, monospace" }}>✦ Set</span>
+            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: RARITIES.legendary.color, fontFamily: "ui-monospace, Menlo, monospace" }}>✦ Set</span>
           )}
         </div>
       )}
@@ -2728,18 +2841,18 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.88)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div style={{ background: "#1B2430", border: `1px solid ${accent}`, borderRadius: 18, padding: 24, width: "100%", maxWidth: 360, textAlign: "center" }}>
               <Trophy size={28} color={accent} style={{ marginBottom: 10 }} />
-              <h2 style={{ margin: "0 0 4px", fontSize: 20, fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Level {pending.level}!</h2>
-              <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 6px" }}>{pending.rank}</p>
-              {statChoiceQueue.length > 1 && <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 14px" }}>{statChoiceQueue.length - 1} more choice{statChoiceQueue.length > 2 ? "s" : ""} pending</p>}
-              <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 18px", fontWeight: 600 }}>Choose a permanent stat upgrade:</p>
+              <h2 style={{ margin: "0 0 4px", fontSize: "calc(20px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif", color: accent }}>Level {pending.level}!</h2>
+              <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 6px" }}>{pending.rank}</p>
+              {statChoiceQueue.length > 1 && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 14px" }}>{statChoiceQueue.length - 1} more choice{statChoiceQueue.length > 2 ? "s" : ""} pending</p>}
+              <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", margin: "0 0 18px", fontWeight: 600 }}>Choose a permanent stat upgrade:</p>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {choices.map((c) => (
                   <button key={c.key} onClick={() => pick(c)} className="qlog-btn"
                     style={{ background: "#232E3D", border: `1.5px solid ${accent}33`, borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "border-color 0.15s" }}
                     onMouseEnter={(e) => e.currentTarget.style.borderColor = accent}
                     onMouseLeave={(e) => e.currentTarget.style.borderColor = `${accent}33`}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: "#EDE4D3" }}>{c.label}</span>
-                    <span style={{ fontSize: 12, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{c.sub}</span>
+                    <span style={{ fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>{c.label}</span>
+                    <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{c.sub}</span>
                   </button>
                 ))}
               </div>
@@ -2747,12 +2860,12 @@ function AppContent({ user }) {
           </div>
         );
       })()}
-      {streakBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C1652B, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{streakBanner.days}-day streak! +{streakBanner.bonus} XP</span></div>}
-      {bossBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #8A5FBF, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Crown size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>Boss defeated! Bonus XP earned.</span></div>}
-      {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 14 }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
-      {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
-      {rankTierBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${rankTierBanner.color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Trophy size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{rankTierBanner.tierName} I reached! +{rankTierBanner.xp} XP +{rankTierBanner.gold}g</span></div>}
-      {challengeResultBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0) + (rankTierBanner ? 60 : 0), left: "50%", zIndex: 96, background: challengeResultBanner.tie ? "linear-gradient(135deg, #8A8578, #1B2430)" : challengeResultBanner.won ? "linear-gradient(135deg, #4C9A6A, #1B2430)" : "linear-gradient(135deg, #8A2E44, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sword size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{challengeResultBanner.tie ? `Tied ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : challengeResultBanner.won ? `Beat ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : `${challengeResultBanner.opponentName} won on ${challengeResultBanner.exerciseName}`} +{challengeResultBanner.xp} XP +{challengeResultBanner.gold}g</span></div>}
+      {streakBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C1652B, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }}>{streakBanner.days}-day streak! +{streakBanner.bonus} XP</span></div>}
+      {bossBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #8A5FBF, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Crown size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }}>Boss defeated! Bonus XP earned.</span></div>}
+      {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: "calc(14px * var(--ui-scale, 1))" }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
+      {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
+      {rankTierBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${rankTierBanner.color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Trophy size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }}>{rankTierBanner.tierName} I reached! +{rankTierBanner.xp} XP +{rankTierBanner.gold}g</span></div>}
+      {challengeResultBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0) + (rankTierBanner ? 60 : 0), left: "50%", zIndex: 96, background: challengeResultBanner.tie ? "linear-gradient(135deg, #8A8578, #1B2430)" : challengeResultBanner.won ? "linear-gradient(135deg, #4C9A6A, #1B2430)" : "linear-gradient(135deg, #8A2E44, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sword size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }}>{challengeResultBanner.tie ? `Tied ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : challengeResultBanner.won ? `Beat ${challengeResultBanner.opponentName} on ${challengeResultBanner.exerciseName}!` : `${challengeResultBanner.opponentName} won on ${challengeResultBanner.exerciseName}`} +{challengeResultBanner.xp} XP +{challengeResultBanner.gold}g</span></div>}
 
       {/* Confetti burst on level up */}
       {confettiPieces.map((p) => (
@@ -2762,12 +2875,12 @@ function AppContent({ user }) {
       {/* ---- BATTLE PENDING BANNER ---- */}
       {pendingBattle && !battleState && (
         <div style={{ position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", left: "50%", transform: "translateX(-50%)", zIndex: 65, background: "linear-gradient(135deg, #8A2E44, #232E3D)", border: "1px solid #8A2E44", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 6px 24px rgba(0,0,0,0.5)", cursor: "pointer", whiteSpace: "nowrap" }} onClick={startBattle}>
-          <span style={{ fontSize: 20 }}>⚔</span>
+          <span style={{ fontSize: "calc(20px * var(--ui-scale, 1))" }}>⚔</span>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>Weekly Battle Ready!</div>
-            <div style={{ fontSize: 10, color: "#8A8578" }}>{pendingBattle.length} enemies await — tap to fight</div>
+            <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>Weekly Battle Ready!</div>
+            <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>{pendingBattle.length} enemies await — tap to fight</div>
           </div>
-          <button onClick={(e) => { e.stopPropagation(); abandonBattle(); }} style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", fontSize: 16 }}>✕</button>
+          <button onClick={(e) => { e.stopPropagation(); abandonBattle(); }} style={{ background: "none", border: "none", color: "#5C6773", cursor: "pointer", fontSize: "calc(16px * var(--ui-scale, 1))" }}>✕</button>
         </div>
       )}
 
@@ -2778,10 +2891,10 @@ function AppContent({ user }) {
 
             {/* Header — enemy counter */}
             <div style={{ background: "#141C27", borderRadius: "16px 16px 0 0", padding: "10px 16px", borderBottom: "1px solid #33414F", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", fontFamily: "Georgia, serif" }}>
+              <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", fontFamily: "Georgia, serif" }}>
                 {battleState.phase === "victory" ? "⚔ Victory!" : battleState.phase === "defeat" ? "💔 Defeated" : battleState.phase === "drop" ? "🎁 Item Drop!" : "⚔ Weekly Battle"}
               </span>
-              <span style={{ fontSize: 11, color: "#8A8578" }}>{Math.min(battleState.currentIndex, battleState.enemies.length)}/{battleState.enemies.length} defeated</span>
+              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>{Math.min(battleState.currentIndex, battleState.enemies.length)}/{battleState.enemies.length} defeated</span>
             </div>
 
             {/* Enemy visual arena */}
@@ -2800,13 +2913,13 @@ function AppContent({ user }) {
                     </div>
                     {/* Enemy stats */}
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: enemyColor, marginBottom: 2 }}>
+                      <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: enemyColor, marginBottom: 2 }}>
                         {enemy.isBoss ? "👑 " : ""}{enemy.name}
                       </div>
-                      <div style={{ fontSize: 10, color: "#8A8578", marginBottom: 4 }}>
+                      <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 4 }}>
                         {themedDifficulties.find((d) => d.key === enemy.difficulty)?.label} · ATK {enemy.atk}
                       </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#5C6773", marginBottom: 3 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", marginBottom: 3 }}>
                         <span>HP</span><span>{enemy.hp}/{enemy.maxHp}</span>
                       </div>
                       <div style={{ height: 7, background: "#232E3D", borderRadius: 4, overflow: "hidden" }}>
@@ -2815,7 +2928,7 @@ function AppContent({ user }) {
                     </div>
                   </div>
                   {/* Player HP */}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#5C6773", marginBottom: 3 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", marginBottom: 3 }}>
                     <span>Your HP</span>
                     <span>{battleState.playerHp}/{battleState.playerMaxHp} · ATK {getPlayerCombatStats().atk} · DEF {activeStats.defense} · {Math.round(getPlayerCombatStats().miss * 100)}% miss{activeStats.critChance > 0 ? ` · ${Math.round(activeStats.critChance * 100)}% crit` : ""}</span>
                   </div>
@@ -2825,12 +2938,12 @@ function AppContent({ user }) {
                   {/* Enemy queue preview */}
                   {battleState.enemies.length > 1 && (
                     <div style={{ display: "flex", gap: 4, marginTop: 8, alignItems: "center" }}>
-                      <span style={{ fontSize: 9, color: "#5C6773", marginRight: 2 }}>Queue:</span>
+                      <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", marginRight: 2 }}>Queue:</span>
                       {battleState.enemies.map((e, i) => {
                         const d = themedDifficulties.find((d) => d.key === e.difficulty);
                         return (
                           <div key={e.id} style={{ width: 18, height: 18, borderRadius: "50%", background: i < battleState.currentIndex ? "#2C3947" : i === battleState.currentIndex ? (e.isBoss ? "#C9A227" : d?.color || "#8A8578") : "#232E3D", border: `1.5px solid ${i === battleState.currentIndex ? (e.isBoss ? "#C9A227" : d?.color || "#8A8578") : "#33414F"}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                            {e.isBoss && i >= battleState.currentIndex && <span style={{ fontSize: 8 }}>👑</span>}
+                            {e.isBoss && i >= battleState.currentIndex && <span style={{ fontSize: "calc(8px * var(--ui-scale, 1))" }}>👑</span>}
                           </div>
                         );
                       })}
@@ -2852,24 +2965,24 @@ function AppContent({ user }) {
                   : line.includes("⚔") ? accent
                   : "#EDE4D3";
                 return (
-                  <div key={i} style={{ fontSize: 12, color, padding: "5px 0", borderBottom: i < arr.length - 1 ? "1px solid #1F2836" : "none", opacity: isLatest ? 1 : 0.65 + (i / arr.length) * 0.35 }}>
+                  <div key={i} style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color, padding: "5px 0", borderBottom: i < arr.length - 1 ? "1px solid #1F2836" : "none", opacity: isLatest ? 1 : 0.65 + (i / arr.length) * 0.35 }}>
                     {line}
                   </div>
                 );
               })}
-              {battleAnimating && <div style={{ fontSize: 11, color: "#5C6773", marginTop: 4 }}>...</div>}
+              {battleAnimating && <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 4 }}>...</div>}
 
               {/* Drop reveal */}
               {battleState.phase === "drop" && battleState.pendingDrop && (
                 <div style={{ background: RARITIES[battleState.pendingDrop.item.rarity].glow, border: `1px solid ${RARITIES[battleState.pendingDrop.item.rarity].color}`, borderRadius: 12, padding: "14px", marginTop: 8, textAlign: "center" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 36, marginBottom: 6 }}>{battleState.pendingDrop.item.icon(RARITIES[battleState.pendingDrop.item.rarity].color)}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: RARITIES[battleState.pendingDrop.item.rarity].color }}>{battleState.pendingDrop.item.label}</div>
-                  <div style={{ fontSize: 10, color: "#8A8578", margin: "3px 0" }}>{battleState.pendingDrop.item.desc}</div>
-                  <div style={{ fontSize: 10, color: RARITIES[battleState.pendingDrop.item.rarity].color, fontWeight: 700 }}>{RARITIES[battleState.pendingDrop.item.rarity].label} · {battleState.pendingDrop.isNew ? "✨ New item!" : "Duplicate"}</div>
+                  <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: RARITIES[battleState.pendingDrop.item.rarity].color }}>{battleState.pendingDrop.item.label}</div>
+                  <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", margin: "3px 0" }}>{battleState.pendingDrop.item.desc}</div>
+                  <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: RARITIES[battleState.pendingDrop.item.rarity].color, fontWeight: 700 }}>{RARITIES[battleState.pendingDrop.item.rarity].label} · {battleState.pendingDrop.isNew ? "✨ New item!" : "Duplicate"}</div>
                   {!battleState.pendingDrop.isNew && battleState.pendingDrop.dupeGold > 0 && (
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace", margin: "4px 0" }}>+{battleState.pendingDrop.dupeGold}g</div>
+                    <div style={{ fontSize: "calc(18px * var(--ui-scale, 1))", fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace", margin: "4px 0" }}>+{battleState.pendingDrop.dupeGold}g</div>
                   )}
-                  <button onClick={claimDrop} className="qlog-btn" style={{ marginTop: 10, background: accent, border: "none", borderRadius: 8, padding: "7px 20px", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Claim & Continue</button>
+                  <button onClick={claimDrop} className="qlog-btn" style={{ marginTop: 10, background: accent, border: "none", borderRadius: 8, padding: "7px 20px", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Claim & Continue</button>
                 </div>
               )}
 
@@ -2877,26 +2990,26 @@ function AppContent({ user }) {
               {battleState.phase === "victory" && (
                 <div style={{ textAlign: "center", padding: "20px 0" }}>
                   <Trophy size={40} color={accent} style={{ marginBottom: 10 }} />
-                  <div style={{ fontSize: 17, fontWeight: 700, color: accent, fontFamily: "Georgia, serif", marginBottom: 6 }}>All enemies defeated!</div>
-                  <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 16 }}>
+                  <div style={{ fontSize: "calc(17px * var(--ui-scale, 1))", fontWeight: 700, color: accent, fontFamily: "Georgia, serif", marginBottom: 6 }}>All enemies defeated!</div>
+                  <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 16 }}>
                     <span style={{ color: "#C9A227", fontWeight: 700 }}>+{battleState.goldEarned}g</span> · <span style={{ color: accent, fontWeight: 700 }}>+{battleState.xpEarned} XP</span>
                   </div>
-                  <button onClick={() => { setBattleState(null); setPendingBattle(null); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 10, padding: "12px 36px", fontSize: 14, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Claim Rewards</button>
+                  <button onClick={() => { setBattleState(null); setPendingBattle(null); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 10, padding: "12px 36px", fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Claim Rewards</button>
                 </div>
               )}
 
               {/* Defeat screen */}
               {battleState.phase === "defeat" && (
                 <div style={{ textAlign: "center", padding: "20px 0" }}>
-                  <div style={{ fontSize: 36, marginBottom: 10 }}>💔</div>
-                  <div style={{ fontSize: 17, fontWeight: 700, color: "#8A2E44", fontFamily: "Georgia, serif", marginBottom: 6 }}>Defeated!</div>
-                  <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 4 }}>You fell before clearing all enemies.</div>
+                  <div style={{ fontSize: "calc(36px * var(--ui-scale, 1))", marginBottom: 10 }}>💔</div>
+                  <div style={{ fontSize: "calc(17px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A2E44", fontFamily: "Georgia, serif", marginBottom: 6 }}>Defeated!</div>
+                  <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 4 }}>You fell before clearing all enemies.</div>
                   {battleState.goldEarned > 0 || battleState.xpEarned > 0 ? (
-                    <div style={{ fontSize: 13, color: "#8A8578", marginBottom: 16 }}>
+                    <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 16 }}>
                       Still earned: <span style={{ color: "#C9A227", fontWeight: 700 }}>+{battleState.goldEarned}g</span> · <span style={{ color: accent, fontWeight: 700 }}>+{battleState.xpEarned} XP</span>
                     </div>
                   ) : <div style={{ marginBottom: 16 }} />}
-                  <button onClick={() => { setBattleState(null); setPendingBattle(null); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 10, padding: "12px 36px", fontSize: 14, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>End Battle</button>
+                  <button onClick={() => { setBattleState(null); setPendingBattle(null); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 10, padding: "12px 36px", fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>End Battle</button>
                 </div>
               )}
             </div>
@@ -2905,15 +3018,15 @@ function AppContent({ user }) {
             {battleState.phase === "fighting" && (
               <div style={{ padding: "10px 16px 14px", borderTop: "1px solid #33414F", flexShrink: 0, display: "flex", gap: 8 }}>
                 <button onClick={() => doPlayerTurn(false)} disabled={battleAnimating} className="qlog-btn"
-                  style={{ flex: 2, background: battleAnimating ? "#2C3947" : "#8A2E44", border: "none", borderRadius: 10, padding: "13px 0", fontSize: 14, fontWeight: 700, color: battleAnimating ? "#5C6773" : "#EDE4D3", cursor: battleAnimating ? "default" : "pointer" }}>
+                  style={{ flex: 2, background: battleAnimating ? "#2C3947" : "#8A2E44", border: "none", borderRadius: 10, padding: "13px 0", fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700, color: battleAnimating ? "#5C6773" : "#EDE4D3", cursor: battleAnimating ? "default" : "pointer" }}>
                   ⚔ Attack
                 </button>
                 <button onClick={doBlock} disabled={battleAnimating || blockCooldown > 0} className="qlog-btn"
-                  style={{ flex: 1, background: battleAnimating || blockCooldown > 0 ? "#2C3947" : "#232E3D", border: `1px solid ${blockCooldown > 0 ? "#33414F" : "#4FA3C9"}`, borderRadius: 10, padding: "13px 0", fontSize: 12, fontWeight: 700, color: battleAnimating || blockCooldown > 0 ? "#5C6773" : "#4FA3C9", cursor: battleAnimating || blockCooldown > 0 ? "default" : "pointer" }}>
+                  style={{ flex: 1, background: battleAnimating || blockCooldown > 0 ? "#2C3947" : "#232E3D", border: `1px solid ${blockCooldown > 0 ? "#33414F" : "#4FA3C9"}`, borderRadius: 10, padding: "13px 0", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: battleAnimating || blockCooldown > 0 ? "#5C6773" : "#4FA3C9", cursor: battleAnimating || blockCooldown > 0 ? "default" : "pointer" }}>
                   {blockCooldown > 0 ? `🛡 (${blockCooldown})` : "🛡 Block"}
                 </button>
                 <button onClick={abandonBattle} className="qlog-btn qlog-card"
-                  style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "13px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Flee</button>
+                  style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "13px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Flee</button>
               </div>
             )}
           </div>
@@ -2924,8 +3037,8 @@ function AppContent({ user }) {
       {focus && focus.started && !focusOpen && (
         <button onClick={() => setFocusOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom, 0px))", right: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${timerColor}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
           <Timer size={16} color={timerColor} className={focus.secondsLeft === 0 ? "pulse" : ""} />
-          <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: timerColor, fontSize: 14 }}>{focus.secondsLeft === 0 ? "Time's up" : fmtTime(focus.secondsLeft)}</span>
-          <span style={{ fontSize: 11, color: "#8A8578", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{focus.title}</span>
+          <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: timerColor, fontSize: "calc(14px * var(--ui-scale, 1))" }}>{focus.secondsLeft === 0 ? "Time's up" : fmtTime(focus.secondsLeft)}</span>
+          <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{focus.title}</span>
         </button>
       )}
 
@@ -2934,16 +3047,16 @@ function AppContent({ user }) {
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 24, width: "100%", maxWidth: 340, position: "relative" }}>
             <button onClick={() => setFocusOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><Timer size={17} color={accent} /><span style={{ fontSize: 12, color: "#8A8578", fontWeight: 600 }}>FOCUS SESSION</span></div>
-            <h3 style={{ margin: "4px 0 18px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>{focus.title}</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><Timer size={17} color={accent} /><span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", fontWeight: 600 }}>FOCUS SESSION</span></div>
+            <h3 style={{ margin: "4px 0 18px", fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>{focus.title}</h3>
             {!focus.started ? (<>
-              <label style={{ fontSize: 12, color: "#8A8578" }}>Minutes to race the clock:</label>
-              <input type="number" min={1} max={240} value={focus.minutesInput} onChange={(e) => setFocus((f) => ({ ...f, minutesInput: Math.max(1, Math.min(240, Number(e.target.value) || 1)) }))} style={{ width: "100%", margin: "8px 0 18px", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 16, fontFamily: "ui-monospace, Menlo, monospace" }} />
+              <label style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578" }}>Minutes to race the clock:</label>
+              <input type="number" min={1} max={240} value={focus.minutesInput} onChange={(e) => setFocus((f) => ({ ...f, minutesInput: Math.max(1, Math.min(240, Number(e.target.value) || 1)) }))} style={{ width: "100%", margin: "8px 0 18px", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: "calc(16px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace" }} />
               <button onClick={startFocus} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}><Play size={16} /> Start</button>
             </>) : (<>
               <div style={{ textAlign: "center", margin: "8px 0 16px" }}>
-                <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 44, fontWeight: 700, color: timerColor }}>{fmtTime(focus.secondsLeft)}</div>
-                {focus.secondsLeft === 0 && <div style={{ fontSize: 12, color: "#8A2E44", marginTop: 4 }}>Time's up — finish strong or mark it done.</div>}
+                <div style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: "calc(44px * var(--ui-scale, 1))", fontWeight: 700, color: timerColor }}>{fmtTime(focus.secondsLeft)}</div>
+                {focus.secondsLeft === 0 && <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A2E44", marginTop: 4 }}>Time's up — finish strong or mark it done.</div>}
               </div>
               <div style={{ height: 8, background: "#141C27", borderRadius: 6, overflow: "hidden", marginBottom: 18 }}>
                 <div style={{ height: "100%", width: `${timerPct}%`, background: timerColor, borderRadius: 6, transition: "width 1s linear, background 0.3s ease" }} />
@@ -2953,7 +3066,7 @@ function AppContent({ user }) {
                 <button onClick={resetFocus} className="qlog-btn" aria-label="Reset" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", cursor: "pointer" }}><RotateCcw size={15} /></button>
               </div>
               <button onClick={completeFromFocus} className="qlog-btn" style={{ width: "100%", background: "#4C9A6A", border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: "pointer", color: "#141C27" }}>Mark quest complete</button>
-              {focus.secondsLeft > 0 && <p style={{ fontSize: 11, color: "#5C6773", textAlign: "center", marginTop: 8 }}>Finish before time's up for a bonus XP boost.</p>}
+              {focus.secondsLeft > 0 && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", textAlign: "center", marginTop: 8 }}>Finish before time's up for a bonus XP boost.</p>}
             </>)}
           </div>
         </div>
@@ -2963,8 +3076,8 @@ function AppContent({ user }) {
       {workoutSession && !sessionOverlayOpen && (
         <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom, 0px))", left: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
           <IconDumbbell size={16} color={accent} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workoutSession.planName}</span>
-          {workoutSession.restTimer && <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: accent, fontSize: 12 }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>}
+          <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workoutSession.planName}</span>
+          {workoutSession.restTimer && <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: accent, fontSize: "calc(12px * var(--ui-scale, 1))" }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>}
         </button>
       )}
 
@@ -2972,24 +3085,24 @@ function AppContent({ user }) {
       {workoutSession && sessionOverlayOpen && (
         <div style={{ position: "fixed", inset: 0, background: "#141C27", zIndex: 72, overflowY: "auto", padding: "16px 14px 100px", paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-            <button onClick={() => setSessionOverlayOpen(false)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}><ChevronLeft size={16} /> Minimize</button>
-            <button onClick={() => setDiscardConfirmOpen(true)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", fontSize: 12 }}>Discard</button>
+            <button onClick={() => setSessionOverlayOpen(false)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: "calc(12px * var(--ui-scale, 1))" }}><ChevronLeft size={16} /> Minimize</button>
+            <button onClick={() => setDiscardConfirmOpen(true)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))" }}>Discard</button>
           </div>
-          <h2 style={{ margin: "6px 0 2px", fontSize: 18, fontWeight: 700, fontFamily: "Georgia, serif" }}>{workoutSession.planName}</h2>
-          <div style={{ fontSize: 12, color: "#8A8578", marginBottom: 14, fontFamily: "ui-monospace, Menlo, monospace" }}>{fmtTime(Math.floor((Date.now() - workoutSession.startedAt) / 1000))} elapsed</div>
+          <h2 style={{ margin: "6px 0 2px", fontSize: "calc(18px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>{workoutSession.planName}</h2>
+          <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 14, fontFamily: "ui-monospace, Menlo, monospace" }}>{fmtTime(Math.floor((Date.now() - workoutSession.startedAt) / 1000))} elapsed</div>
 
           {workoutSession.restTimer && (
             <div style={{ background: "rgba(201,162,39,0.1)", border: `1px solid ${accent}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.4 }}>Rest</span>
-                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 20, fontWeight: 700, color: accent }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>
+                <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.4 }}>Rest</span>
+                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: "calc(20px * var(--ui-scale, 1))", fontWeight: 700, color: accent }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>
               </div>
               <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
                 <div style={{ height: "100%", width: `${(workoutSession.restTimer.secondsLeft / workoutSession.restTimer.totalSeconds) * 100}%`, background: accent, borderRadius: 4, transition: "width 1s linear" }} />
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={() => adjustRestTimer(30)} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: 11, color: "#EDE4D3", cursor: "pointer" }}>+30s</button>
-                <button onClick={skipRestTimer} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Skip</button>
+                <button onClick={() => adjustRestTimer(30)} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#EDE4D3", cursor: "pointer" }}>+30s</button>
+                <button onClick={skipRestTimer} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Skip</button>
               </div>
             </div>
           )}
@@ -3004,7 +3117,7 @@ function AppContent({ user }) {
               return (
                 <>
                   <div style={{ marginBottom: 2 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8A8578", marginBottom: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 4 }}>
                       <span>{activeExIdx === -1 ? "Tap an exercise to open it" : `Exercise ${activeExIdx + 1} of ${workoutSession.exercises.length}`}</span>
                       <span style={{ fontFamily: "ui-monospace, Menlo, monospace" }}>{doneSets}/{totalSets} sets</span>
                     </div>
@@ -3021,8 +3134,8 @@ function AppContent({ user }) {
                     if (!isActive) {
                       return (
                         <button key={exIdx} onClick={() => setExpandedSessionExIdx(exIdx)} className="qlog-btn qlog-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, background: ex.isChallengeAddon ? `${accent}14` : "#1F2836", border: `1px solid ${exComplete ? "#4C9A6A" : ex.isChallengeAddon ? accent : "#2C3947"}`, borderRadius: 8, padding: "9px 12px", cursor: "pointer", textAlign: "left" }}>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: exComplete ? "#8A8578" : "#EDE4D3", textDecoration: exComplete ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ex.name}</span>
-                          <span style={{ fontSize: 10, color: exComplete ? "#4C9A6A" : "#5C6773", flexShrink: 0, fontFamily: "ui-monospace, Menlo, monospace" }}>{exComplete ? "✓ Done" : `${exDone}/${ex.sets.length}`}</span>
+                          <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, color: exComplete ? "#8A8578" : "#EDE4D3", textDecoration: exComplete ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ex.name}</span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: exComplete ? "#4C9A6A" : "#5C6773", flexShrink: 0, fontFamily: "ui-monospace, Menlo, monospace" }}>{exComplete ? "✓ Done" : `${exDone}/${ex.sets.length}`}</span>
                         </button>
                       );
                     }
@@ -3030,18 +3143,18 @@ function AppContent({ user }) {
                     return (
                       <div key={exIdx} className="qlog-card" style={{ background: ex.isChallengeAddon ? `${accent}14` : "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 10, padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
-                          <span style={{ fontSize: 10, color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
+                          <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex.name} <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(findExercise(ex.exerciseId, customExercises))} /></span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{ex.targetReps && `Target ${ex.targetReps}`}</span>
                         </div>
                         <div style={{ marginBottom: 8 }}>
                           {ex.isChallengeAddon && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>⚔ Beat {ex.challengeFrom}'s {ex.challengeTargetWeight}kg × {ex.challengeTargetReps} — ignore to decline</span>
+                            <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: accent }}>⚔ Beat {ex.challengeFrom}'s {ex.challengeTargetWeight}kg × {ex.challengeTargetReps} — ignore to decline</span>
                           )}
                           {ex.challengeFriendUid && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: accent }}>🏆 Challenging {ex.challengeFriendUsername} on this exercise</span>
+                            <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: accent }}>🏆 Challenging {ex.challengeFriendUsername} on this exercise</span>
                           )}
                           {canChallenge && (
-                            <button onClick={() => setChallengePickerExIdx(exIdx)} className="qlog-btn" style={{ fontSize: 9, fontWeight: 700, color: accent, background: accent + "18", border: `1px solid ${accent}44`, borderRadius: 10, padding: "2px 8px", cursor: "pointer" }}>Challenge?</button>
+                            <button onClick={() => setChallengePickerExIdx(exIdx)} className="qlog-btn" style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: accent, background: accent + "18", border: `1px solid ${accent}44`, borderRadius: 10, padding: "2px 8px", cursor: "pointer" }}>Challenge?</button>
                           )}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -3051,6 +3164,7 @@ function AppContent({ user }) {
                               setNum={setIdx + 1}
                               set={st}
                               accent={accent}
+                              timed={!!findExercise(ex.exerciseId, customExercises)?.timed}
                               onLog={(weight, reps) => logSet(exIdx, setIdx, weight, reps, ex.restSeconds)}
                               onUncomplete={() => uncompleteSet(exIdx, setIdx)}
                               onSkip={() => skipSet(exIdx, setIdx)}
@@ -3060,7 +3174,7 @@ function AppContent({ user }) {
                           ))}
                         </div>
                         {workoutSession.exercises.length > 1 && (
-                          <button onClick={() => setExpandedSessionExIdx(-1)} className="qlog-btn" style={{ marginTop: 8, width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Collapse</button>
+                          <button onClick={() => setExpandedSessionExIdx(-1)} className="qlog-btn" style={{ marginTop: 8, width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "6px 0", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Collapse</button>
                         )}
                       </div>
                     );
@@ -3070,20 +3184,20 @@ function AppContent({ user }) {
             })()}
           </div>
 
-          <button onClick={finishWorkout} className="qlog-btn" style={{ width: "100%", marginTop: 16, background: accent, border: "none", borderRadius: 10, padding: "13px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>Finish Workout</button>
+          <button onClick={finishWorkout} className="qlog-btn" style={{ width: "100%", marginTop: 16, background: accent, border: "none", borderRadius: 10, padding: "13px 0", fontWeight: 700, fontSize: "calc(14px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>Finish Workout</button>
 
-          {workoutXpPop && <div className="xp-pop" style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", fontWeight: 700, fontSize: 14, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{workoutXpPop.xp} XP</div>}
+          {workoutXpPop && <div className="xp-pop" style={{ position: "fixed", bottom: 90, left: "50%", transform: "translateX(-50%)", fontWeight: 700, fontSize: "calc(14px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{workoutXpPop.xp} XP</div>}
         </div>
       )}
 
       {discardConfirmOpen && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={() => setDiscardConfirmOpen(false)}>
           <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Discard this workout?</h3>
-            <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 18px" }}>Logged sets won't be saved.</p>
+            <h3 style={{ margin: "0 0 8px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>Discard this workout?</h3>
+            <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 18px" }}>Logged sets won't be saved.</p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={() => { discardWorkout(); setDiscardConfirmOpen(false); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>Discard workout</button>
-              <button onClick={() => setDiscardConfirmOpen(false)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => { discardWorkout(); setDiscardConfirmOpen(false); }} className="qlog-btn" style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", cursor: "pointer" }}>Discard workout</button>
+              <button onClick={() => setDiscardConfirmOpen(false)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -3092,17 +3206,17 @@ function AppContent({ user }) {
       {habitModalId && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 90, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={closeHabitModal}>
           <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: "0 0 14px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>{habitModalId === "new" ? "Add Habit" : "Edit Habit"}</h3>
-            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Name</label>
-            <input autoFocus value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveHabitModal(); if (e.key === "Escape") closeHabitModal(); }} placeholder="e.g. drink water" style={{ width: "100%", marginBottom: 14, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14 }} />
-            <label style={{ display: "block", fontSize: 11, color: "#8A8578", marginBottom: 5 }}>Due time (optional)</label>
-            <input type="time" value={newHabitDeadline} onChange={(e) => setNewHabitDeadline(e.target.value)} style={{ width: "100%", marginBottom: 18, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, colorScheme: "dark" }} />
+            <h3 style={{ margin: "0 0 14px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>{habitModalId === "new" ? "Add Habit" : "Edit Habit"}</h3>
+            <label style={{ display: "block", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 5 }}>Name</label>
+            <input autoFocus value={newHabitName} onChange={(e) => setNewHabitName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveHabitModal(); if (e.key === "Escape") closeHabitModal(); }} placeholder="e.g. drink water" style={{ width: "100%", marginBottom: 14, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))" }} />
+            <label style={{ display: "block", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 5 }}>Due time (optional)</label>
+            <input type="time" value={newHabitDeadline} onChange={(e) => setNewHabitDeadline(e.target.value)} style={{ width: "100%", marginBottom: 18, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))", colorScheme: "dark" }} />
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={saveHabitModal} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: 14, color: "#1B2430", cursor: "pointer" }}>{habitModalId === "new" ? "Add Habit" : "Save Changes"}</button>
+              <button onClick={saveHabitModal} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: "calc(14px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>{habitModalId === "new" ? "Add Habit" : "Save Changes"}</button>
               {habitModalId !== "new" && (
-                <button onClick={() => { deleteHabit(habitModalId); closeHabitModal(); }} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A2E44", cursor: "pointer" }}>Delete Habit</button>
+                <button onClick={() => { deleteHabit(habitModalId); closeHabitModal(); }} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A2E44", cursor: "pointer" }}>Delete Habit</button>
               )}
-              <button onClick={closeHabitModal} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+              <button onClick={closeHabitModal} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
             </div>
           </div>
         </div>
@@ -3111,15 +3225,15 @@ function AppContent({ user }) {
       {challengePickerExIdx !== null && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 95, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setChallengePickerExIdx(null)}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 320 }}>
-            <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Sword size={16} color={accent} /> Challenge a friend</h3>
-            <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 14px" }}>Your best completed set on this exercise gets sent once you finish the workout.</p>
-            {friendIds.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>Add a friend first to challenge them.</p>}
+            <h3 style={{ margin: "0 0 4px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Sword size={16} color={accent} /> Challenge a friend</h3>
+            <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 14px" }}>Your best completed set on this exercise gets sent once you finish the workout.</p>
+            {friendIds.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>Add a friend first to challenge them.</p>}
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14, maxHeight: 240, overflowY: "auto" }}>
               {friendIds.map((uid) => friendsData[uid] && (
-                <button key={uid} onClick={() => flagChallengeExercise(challengePickerExIdx, uid, friendsData[uid].username)} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", fontSize: 13, color: "#EDE4D3", textAlign: "left", cursor: "pointer" }}>{friendsData[uid].username}</button>
+                <button key={uid} onClick={() => flagChallengeExercise(challengePickerExIdx, uid, friendsData[uid].username)} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", textAlign: "left", cursor: "pointer" }}>{friendsData[uid].username}</button>
               ))}
             </div>
-            <button onClick={() => setChallengePickerExIdx(null)} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+            <button onClick={() => setChallengePickerExIdx(null)} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
           </div>
         </div>
       )}
@@ -3147,21 +3261,21 @@ function AppContent({ user }) {
         <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}
           onClick={() => setDeleteSeriesPromptFor(null)}>
           <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 340 }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Delete repeated quest?</h3>
-            <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 18px" }}>
+            <h3 style={{ margin: "0 0 8px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>Delete repeated quest?</h3>
+            <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 18px" }}>
               <strong style={{ color: "#EDE4D3" }}>"{deleteSeriesPromptFor.title}"</strong> is part of a repeat series. Delete just this one, or the whole series?
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               <button onClick={() => deleteQuestOnly(deleteSeriesPromptFor.id)} className="qlog-btn"
-                style={{ background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "11px 0", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>
+                style={{ background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "11px 0", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", cursor: "pointer" }}>
                 Delete this one only
               </button>
               <button onClick={() => deleteQuestSeries(deleteSeriesPromptFor.seriesId)} className="qlog-btn"
-                style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: 13, color: "#EDE4D3", cursor: "pointer" }}>
+                style={{ background: "#8A2E44", border: "none", borderRadius: 8, padding: "11px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", cursor: "pointer" }}>
                 Delete entire series
               </button>
               <button onClick={() => setDeleteSeriesPromptFor(null)} className="qlog-btn"
-                style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}>
+                style={{ background: "none", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>
                 Cancel
               </button>
             </div>
@@ -3172,28 +3286,29 @@ function AppContent({ user }) {
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 12px" }}>
         {/* Header */}
         <div style={{ padding: "16px 0 14px", borderBottom: `1px solid ${themePersonality.borderCol}`, marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span>{(() => { const w = ITEM_CATALOGUE.find((i) => i.id === equipped.weapon); return w ? w.icon(accent) : <Sword size={22} color={accent} />; })()}</span>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                <h1 style={{ fontWeight: 700, fontSize: 20, margin: 0, fontFamily: "Georgia, serif" }}>Quest Log</h1>
+                <h1 style={{ fontWeight: 700, fontSize: "calc(20px * var(--ui-scale, 1))", margin: 0, fontFamily: "Georgia, serif" }}>Quest Log</h1>
                 {equipped.badge && <span>{(() => { const b = ITEM_CATALOGUE.find((i) => i.id === equipped.badge); return b ? b.icon(RARITIES[b.rarity].color) : null; })()}</span>}
               </div>
               {equipped.title && (
-                <span style={{ fontSize: 10, color: accent, fontWeight: 600 }}>{ITEM_CATALOGUE.find((i) => i.id === equipped.title)?.value}</span>
+                <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: accent, fontWeight: 600 }}>{ITEM_CATALOGUE.find((i) => i.id === equipped.title)?.value}</span>
               )}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <button onClick={() => setCrateModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12, fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
+            <button onClick={() => setCrateModalOpen(true)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "7px 9px", color: "#EDE4D3", cursor: "pointer", fontFamily: "ui-monospace, Menlo, monospace", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700 }}><Coins size={13} color="#C9A227" /> {gold}</button>
             <button onClick={() => setSettingsOpen(true)} aria-label="Account & Settings" className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, width: 30, height: 30, color: "#8A8578", cursor: "pointer" }}><IconUser size={15} /></button>
           </div>
         </div>
+        </div>{/* end header gradient */}
 
         {/* XP / Streak (Home tab) */}
         {activeTab === "home" && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 12 }}>
           <div className="qlog-card" style={{ flex: "1 1 240px", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -3202,27 +3317,27 @@ function AppContent({ user }) {
                   if (devTapTimer.current) clearTimeout(devTapTimer.current);
                   devTapTimer.current = setTimeout(() => { devTapCount.current = 0; }, 1500);
                   if (devTapCount.current >= 5) { devTapCount.current = 0; setDevMode((v) => !v); }
-                }} style={{ fontWeight: 700, fontSize: 18, color: auraColor || accent, fontFamily: "Georgia, serif", cursor: "default", userSelect: "none", textShadow: auraColor ? `0 0 12px ${auraColor}88` : "none" }}>Lv {level}</span>
-                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, color: "#8A8578" }}>{into}/{need} XP</span>
+                }} style={{ fontWeight: 700, fontSize: "calc(18px * var(--ui-scale, 1))", color: auraColor || accent, fontFamily: "Georgia, serif", cursor: "default", userSelect: "none", textShadow: auraColor ? `0 0 12px ${auraColor}88` : "none" }}>Lv {level}</span>
+                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>{into}/{need} XP</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <Flame size={14} color={streak > 0 ? "#C1652B" : "#4A5563"} fill={streak > 0 ? "#C1652B" : "none"} />
-                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, fontSize: 12, color: streak > 0 ? "#C1652B" : "#8A8578" }}>{streak}d</span>
+                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, fontSize: "calc(12px * var(--ui-scale, 1))", color: streak > 0 ? "#C1652B" : "#8A8578" }}>{streak}d</span>
                 {streak > 0 && lastActiveDate && lastActiveDate < yesterdayStr() && (
-                  <span style={{ fontSize: 10, color: "#8A2E44", fontWeight: 600 }}>❄ missed</span>
+                  <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A2E44", fontWeight: 600 }}>❄ missed</span>
                 )}
               </div>
             </div>
-            <div style={{ fontSize: 10, color: "#8A8578", marginBottom: 6 }}>
+            <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 6 }}>
               {rank}{nextMilestone && ` · Lv ${nextMilestone} next trophy`}
-              {activeAura?.value && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 700, color: auraColor, background: auraColor + "22", borderRadius: 10, padding: "1px 6px", border: `1px solid ${auraColor}44` }}>{activeAura.value}</span>}
+              {activeAura?.value && <span style={{ marginLeft: 8, fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: auraColor, background: auraColor + "22", borderRadius: 10, padding: "1px 6px", border: `1px solid ${auraColor}44` }}>{activeAura.value}</span>}
             </div>
             {(playerStats.bonusHp > 0 || playerStats.bonusDef > 0 || playerStats.bonusAtk > 0 || playerStats.bonusCrit > 0) && (
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                {playerStats.bonusHp > 0 && <span style={{ fontSize: 9, color: "#8A2E44", background: "#8A2E4422", borderRadius: 8, padding: "1px 5px" }}>❤ +{playerStats.bonusHp}HP</span>}
-                {playerStats.bonusDef > 0 && <span style={{ fontSize: 9, color: "#4FA3C9", background: "#4FA3C922", borderRadius: 8, padding: "1px 5px" }}>🛡 +{playerStats.bonusDef}DEF</span>}
-                {playerStats.bonusAtk > 0 && <span style={{ fontSize: 9, color: accent, background: accent + "22", borderRadius: 8, padding: "1px 5px" }}>⚔ +{playerStats.bonusAtk}ATK</span>}
-                {playerStats.bonusCrit > 0 && <span style={{ fontSize: 9, color: "#C1652B", background: "#C1652B22", borderRadius: 8, padding: "1px 5px" }}>💥 +{Math.round(playerStats.bonusCrit * 100)}%crit</span>}
+                {playerStats.bonusHp > 0 && <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#8A2E44", background: "#8A2E4422", borderRadius: 8, padding: "1px 5px" }}>❤ +{playerStats.bonusHp}HP</span>}
+                {playerStats.bonusDef > 0 && <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#4FA3C9", background: "#4FA3C922", borderRadius: 8, padding: "1px 5px" }}>🛡 +{playerStats.bonusDef}DEF</span>}
+                {playerStats.bonusAtk > 0 && <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: accent, background: accent + "22", borderRadius: 8, padding: "1px 5px" }}>⚔ +{playerStats.bonusAtk}ATK</span>}
+                {playerStats.bonusCrit > 0 && <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#C1652B", background: "#C1652B22", borderRadius: 8, padding: "1px 5px" }}>💥 +{Math.round(playerStats.bonusCrit * 100)}%crit</span>}
               </div>
             )}
             <div style={{ height: 7, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 8, position: "relative", boxShadow: themePersonality.xpGlow }}>
@@ -3246,9 +3361,9 @@ function AppContent({ user }) {
           {(() => {
             const info = overallRankForBonus ? overallRankForBonus.info : rankInfo(-1);
             return (
-              <button onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn qlog-card" style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, background: `linear-gradient(135deg, ${info.color}22, ${themePersonality.cardBase})`, border: `1px solid ${info.color}66`, borderRadius: 10, padding: "10px 16px", cursor: "pointer", minWidth: 92 }}>
-                {info.unranked ? <IconShield size={40} color={info.color} /> : <RankShieldIcon tierIndex={info.tierIdx} numeral={info.sub} color={info.color} size={46} />}
-                <span style={{ fontSize: 11, fontWeight: 700, color: info.color, whiteSpace: "nowrap" }}>{info.label}</span>
+              <button onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn qlog-card" style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, background: `linear-gradient(135deg, ${info.color}22, ${themePersonality.cardBase})`, border: `1px solid ${info.color}66`, borderRadius: 10, padding: "12px", cursor: "pointer", width: 110 }}>
+                {info.unranked ? <IconShield size={54} color={info.color} /> : <RankShieldIcon tierIndex={info.tierIdx} numeral={info.sub} color={info.color} size={62} />}
+                <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: info.color, whiteSpace: "nowrap" }}>{info.label}</span>
               </button>
             );
           })()}
@@ -3256,13 +3371,12 @@ function AppContent({ user }) {
           {bossQuest && (
             <div style={{ flex: "1 1 100%", display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", background: "rgba(138,95,191,0.1)", borderRadius: 8, border: "1px solid #8A5FBF" }}>
               <Crown size={12} color="#8A5FBF" />
-              <span style={{ fontSize: 11, color: "#8A5FBF", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}</span>
+              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A5FBF", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}</span>
               <button onClick={() => setWeeklyBossId(null)} style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", padding: 0 }}><X size={12} /></button>
             </div>
           )}
         </div>
         )}
-        </div>{/* end header gradient */}
 
         {/* Home tab snapshot cards */}
         {activeTab === "home" && (
@@ -3270,10 +3384,10 @@ function AppContent({ user }) {
             {/* Daily login crate */}
             {dailyCrateClaimedDate !== today && (
               <button onClick={claimDailyCrate} className="qlog-btn qlog-card" style={{ display: "flex", alignItems: "center", gap: 12, background: `linear-gradient(135deg, ${accent}22, ${themePersonality.cardBase})`, border: `1px solid ${accent}66`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
-                <span style={{ fontSize: 26, lineHeight: 1 }}>🎁</span>
+                <span style={{ fontSize: "calc(26px * var(--ui-scale, 1))", lineHeight: 1 }}>🎁</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>Daily Crate Ready</div>
-                  <div style={{ fontSize: 11, color: "#8A8578" }}>Free crate for logging in today — tap to open</div>
+                  <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>Daily Crate Ready</div>
+                  <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Free crate for logging in today — tap to open</div>
                 </div>
                 <ChevronRight size={16} color={accent} />
               </button>
@@ -3281,20 +3395,20 @@ function AppContent({ user }) {
 
             {/* Today at a glance */}
             <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Today at a glance</div>
+              <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Today at a glance</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button onClick={() => setActiveTab("quests")} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
                   <IconCalendar size={16} color={accent} />
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{completedTodayCount}/{todayQuestsTotal}</div>
-                    <div style={{ fontSize: 10, color: "#8A8578" }}>Quests today</div>
+                    <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>{completedTodayCount}/{todayQuestsTotal}</div>
+                    <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Quests today</div>
                   </div>
                 </button>
                 <button onClick={() => setActiveTab("habits")} className="qlog-btn" style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "9px 10px", cursor: "pointer", textAlign: "left" }}>
                   <Repeat size={16} color={accent} />
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{todayHabitsDone}/{habits.length}</div>
-                    <div style={{ fontSize: 10, color: "#8A8578" }}>Habits today</div>
+                    <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>{todayHabitsDone}/{habits.length}</div>
+                    <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Habits today</div>
                   </div>
                 </button>
               </div>
@@ -3303,20 +3417,20 @@ function AppContent({ user }) {
             {/* This week + Workout summary — paired side by side when there's room */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
             <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>This week</div>
+              <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>This week</div>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{weekCompletedQuests.length}</div>
-                  <div style={{ fontSize: 10, color: "#8A8578" }}>Quests completed</div>
+                  <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{weekCompletedQuests.length}</div>
+                  <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Quests completed</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{weekXP} XP</div>
-                  <div style={{ fontSize: 10, color: "#8A8578" }}>Earned this week</div>
+                  <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{weekXP} XP</div>
+                  <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Earned this week</div>
                 </div>
                 {bossQuest && (
                   <div style={{ flex: 1, minWidth: 140, display: "flex", alignItems: "center", gap: 6, padding: "5px 8px", background: "rgba(138,95,191,0.1)", borderRadius: 6, border: "1px solid #8A5FBF" }}>
                     <Crown size={12} color="#8A5FBF" />
-                    <span style={{ fontSize: 11, color: "#8A5FBF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}{bossQuest.completed ? " ✓ ready" : ""}</span>
+                    <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A5FBF", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Boss: {bossQuest.title}{bossQuest.completed ? " ✓ ready" : ""}</span>
                   </div>
                 )}
               </div>
@@ -3333,8 +3447,8 @@ function AppContent({ user }) {
               return (
                 <div onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Workout summary</span>
-                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: overall.info.color, background: overall.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>
+                    <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Workout summary</span>
+                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: overall.info.color, background: overall.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>
                       {overall.info.unranked ? <IconShield size={11} color={overall.info.color} /> : <RankShieldIcon tierIndex={overall.info.tierIdx} numeral={overall.info.sub} color={overall.info.color} size={13} />}
                       {overall.info.label}
                     </span>
@@ -3343,17 +3457,17 @@ function AppContent({ user }) {
                   {workoutHistory.length > 0 && (
                   <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
                     <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{sessionsThisWeek}</div>
-                      <div style={{ fontSize: 10, color: "#8A8578" }}>Sessions this week</div>
+                      <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{sessionsThisWeek}</div>
+                      <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Sessions this week</div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{workoutHistory.length}</div>
-                      <div style={{ fontSize: 10, color: "#8A8578" }}>Total workouts</div>
+                      <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{workoutHistory.length}</div>
+                      <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Total workouts</div>
                     </div>
                     {lastSession && (
                       <div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{parseLocalDate(lastSession.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</div>
-                        <div style={{ fontSize: 10, color: "#8A8578" }}>Last workout</div>
+                        <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{parseLocalDate(lastSession.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</div>
+                        <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>Last workout</div>
                       </div>
                     )}
                   </div>
@@ -3361,10 +3475,10 @@ function AppContent({ user }) {
 
                   {top.length > 0 && (
                     <div style={{ marginBottom: weakest.length > 0 ? 8 : 0 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Top ranked</div>
+                      <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Top ranked</div>
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                         {top.map((r) => (
-                          <span key={r.id} style={{ fontSize: 10, color: r.info.color, background: r.info.color + "18", border: `1px solid ${r.info.color}44`, borderRadius: 12, padding: "2px 8px" }}>{r.ex?.name || "?"} · {r.info.label}</span>
+                          <span key={r.id} style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: r.info.color, background: r.info.color + "18", border: `1px solid ${r.info.color}44`, borderRadius: 12, padding: "2px 8px" }}>{r.ex?.name || "?"} · {r.info.label}</span>
                         ))}
                       </div>
                     </div>
@@ -3372,15 +3486,15 @@ function AppContent({ user }) {
 
                   {weakest.length > 0 && (
                     <div>
-                      <div style={{ fontSize: 9, fontWeight: 700, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Needs work</div>
+                      <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Needs work</div>
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                         {weakest.map((r) => (
-                          <span key={r.id} style={{ fontSize: 10, color: "#8A8578", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: "2px 8px" }}>{r.ex?.name || "?"} · {r.info.label}</span>
+                          <span key={r.id} style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: "2px 8px" }}>{r.ex?.name || "?"} · {r.info.label}</span>
                         ))}
                       </div>
                     </div>
                   )}
-                  {rankRows.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Complete a workout to start earning ranks.</p>}
+                  {rankRows.length === 0 && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>Complete a workout to start earning ranks.</p>}
                 </div>
               );
             })()}
@@ -3389,8 +3503,8 @@ function AppContent({ user }) {
             {/* Equipped gear preview */}
             <button onClick={() => setActiveTab("gear")} className="qlog-btn qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</span>
-                <span style={{ fontSize: 10, color: "#5C6773" }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
+                <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</span>
+                <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {GEAR_SLOTS.map((slot) => {
@@ -3399,7 +3513,7 @@ function AppContent({ user }) {
                   return (
                     <div key={slot} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: item ? rar.glow : "#1F2836", border: `1px solid ${item ? rar.color : "#2C3947"}`, borderRadius: 8, padding: "7px 4px" }}>
                       <div style={{ height: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>{item ? item.icon(rar.color) : <Plus size={12} color="#33414F" />}</div>
-                      <span style={{ fontSize: 8, fontWeight: 700, color: item ? rar.color : "#4A5563", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{item ? item.label : SLOT_LABELS[slot]}</span>
+                      <span style={{ fontSize: "calc(8px * var(--ui-scale, 1))", fontWeight: 700, color: item ? rar.color : "#4A5563", textAlign: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{item ? item.label : SLOT_LABELS[slot]}</span>
                     </div>
                   );
                 })}
@@ -3409,14 +3523,14 @@ function AppContent({ user }) {
             {/* Recent activity */}
             {recentCompleted.length > 0 && (
               <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent activity</div>
+                <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent activity</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {recentCompleted.map((q) => (
-                    <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                    <div key={q.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                       <Check size={11} color="#4C9A6A" />
                       <span style={{ flex: 1, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.title}</span>
-                      <span style={{ fontSize: 10, color: "#5C6773" }}>{recentDateLabel(q.completedAt)}</span>
-                      <span style={{ fontSize: 10, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{q.xp}</span>
+                      <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{recentDateLabel(q.completedAt)}</span>
+                      <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{q.xp}</span>
                     </div>
                   ))}
                 </div>
@@ -3428,13 +3542,13 @@ function AppContent({ user }) {
         {/* Dev mode panel — tap level 5x to toggle (Home tab) */}
         {activeTab === "home" && devMode && (
           <div style={{ background: "#0D1117", border: "2px dashed #C9A227", borderRadius: 10, padding: "12px 14px", marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace" }}>⚗ DEV MODE</span>
+            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace" }}>⚗ DEV MODE</span>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input type="number" value={devGold} onChange={(e) => setDevGold(e.target.value)} style={{ width: 60, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }} />
-              <button onClick={() => setGold((g) => g + Math.max(0, Number(devGold) || 0))} className="qlog-btn" style={{ background: "#C9A227", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+Gold</button>
+              <input type="number" value={devGold} onChange={(e) => setDevGold(e.target.value)} style={{ width: 60, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontSize: "calc(12px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace" }} />
+              <button onClick={() => setGold((g) => g + Math.max(0, Number(devGold) || 0))} className="qlog-btn" style={{ background: "#C9A227", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+Gold</button>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <input type="number" value={devXP} onChange={(e) => setDevXP(e.target.value)} style={{ width: 60, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }} />
+              <input type="number" value={devXP} onChange={(e) => setDevXP(e.target.value)} style={{ width: 60, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontSize: "calc(12px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace" }} />
               <button onClick={() => {
                 const amount = Math.max(0, Number(devXP) || 0);
                 if (amount <= 0) return;
@@ -3449,11 +3563,11 @@ function AppContent({ user }) {
                   }));
                   setStatChoiceQueue((q) => [...q, ...newChoices]);
                 }
-              }} className="qlog-btn" style={{ background: "#4C9A6A", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+XP</button>
+              }} className="qlog-btn" style={{ background: "#4C9A6A", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>+XP</button>
             </div>
-            <button onClick={() => { setInventory(ITEM_CATALOGUE.map((i) => i.id)); }} className="qlog-btn" style={{ background: "#8A5FBF", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Unlock All</button>
-            <button onClick={simulateBattle} className="qlog-btn" style={{ background: "#C1652B", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>⚔ Sim Battle</button>
-            <button onClick={() => setDevMode(false)} style={{ background: "none", border: "none", color: "#5C6773", fontSize: 11, cursor: "pointer", marginLeft: "auto" }}>close</button>
+            <button onClick={() => { setInventory(ITEM_CATALOGUE.map((i) => i.id)); }} className="qlog-btn" style={{ background: "#8A5FBF", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Unlock All</button>
+            <button onClick={simulateBattle} className="qlog-btn" style={{ background: "#C1652B", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>⚔ Sim Battle</button>
+            <button onClick={() => setDevMode(false)} style={{ background: "none", border: "none", color: "#5C6773", fontSize: "calc(11px * var(--ui-scale, 1))", cursor: "pointer", marginLeft: "auto" }}>close</button>
           </div>
         )}
 
@@ -3464,31 +3578,31 @@ function AppContent({ user }) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <button onClick={() => navCalendar(-1)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", cursor: "pointer" }}><ChevronLeft size={16} /></button>
-              <button onClick={() => { setCalAnchor(today); setSelectedDate(today); }} className={`qlog-btn${!todayInView ? " today-glow" : ""}`} style={{ background: !todayInView ? accent + "22" : "#232E3D", border: `1px solid ${!todayInView ? accent : "#33414F"}`, borderRadius: 6, padding: "5px 10px", color: !todayInView ? accent : "#EDE4D3", cursor: "pointer", fontSize: 12, fontWeight: 600, position: "relative" }}>Today{!todayInView && <span style={{ position: "absolute", top: -3, right: -3, width: 7, height: 7, borderRadius: "50%", background: accent, border: "1.5px solid #1B2430" }} />}</button>
+              <button onClick={() => { setCalAnchor(today); setSelectedDate(today); }} className={`qlog-btn${!todayInView ? " today-glow" : ""}`} style={{ background: !todayInView ? accent + "22" : "#232E3D", border: `1px solid ${!todayInView ? accent : "#33414F"}`, borderRadius: 6, padding: "5px 10px", color: !todayInView ? accent : "#EDE4D3", cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, position: "relative" }}>Today{!todayInView && <span style={{ position: "absolute", top: -3, right: -3, width: 7, height: 7, borderRadius: "50%", background: accent, border: "1.5px solid #1B2430" }} />}</button>
               <button onClick={() => navCalendar(1)} className="qlog-btn" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 6, padding: "5px 8px", color: "#EDE4D3", cursor: "pointer" }}><ChevronRight size={16} /></button>
             </div>
             <div style={{ display: "flex", gap: 4 }}>
               {["day", "week", "month"].map((v) => (
-                <button key={v} onClick={() => setCalView(v)} className="qlog-btn" style={{ fontSize: 11, fontWeight: 700, padding: "5px 8px", borderRadius: 6, border: "1px solid #33414F", background: calView === v ? accent : "#232E3D", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>{v}</button>
+                <button key={v} onClick={() => setCalView(v)} className="qlog-btn" style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, padding: "5px 8px", borderRadius: 6, border: "1px solid #33414F", background: calView === v ? accent : "#232E3D", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>{v}</button>
               ))}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#8A8578" }}>
+            <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, color: "#8A8578" }}>
               {calView === "day" && parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
               {calView === "week" && weekLabel(calAnchor)}
               {calView === "month" && monthLabel(calAnchor)}
             </div>
-            <button onClick={() => setWeekShiftModalOpen(true)} className="qlog-btn" style={{ fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6, border: `1px solid ${accent}44`, background: accent + "18", color: accent, cursor: "pointer" }}>⏱ Shifts</button>
+            <button onClick={() => setWeekShiftModalOpen(true)} className="qlog-btn" style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, padding: "4px 10px", borderRadius: 6, border: `1px solid ${accent}44`, background: accent + "18", color: accent, cursor: "pointer" }}>⏱ Shifts</button>
           </div>
         </div>
 
         {/* Filter toggle + show completed */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <button onClick={() => setQuestFilterOpen((v) => !v)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 700, padding: "4px 9px", borderRadius: 6, border: `1px solid ${questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent : "#33414F"}`, background: questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent + "18" : "#232E3D", color: questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent : "#8A8578", cursor: "pointer" }}>
+          <button onClick={() => setQuestFilterOpen((v) => !v)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, padding: "4px 9px", borderRadius: 6, border: `1px solid ${questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent : "#33414F"}`, background: questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent + "18" : "#232E3D", color: questFilterOpen || questSearch || questDifficultyFilter.length > 0 ? accent : "#8A8578", cursor: "pointer" }}>
             Filter{questDifficultyFilter.length > 0 && ` (${questDifficultyFilter.length})`}
           </button>
-          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "#8A8578", cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>
             <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
             Show completed
           </label>
@@ -3496,19 +3610,19 @@ function AppContent({ user }) {
 
         {questFilterOpen && (
          <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
-            <input value={questSearch} onChange={(e) => setQuestSearch(e.target.value)} placeholder="Search quest titles..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
+            <input value={questSearch} onChange={(e) => setQuestSearch(e.target.value)} placeholder="Search quest titles..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {themedDifficulties.map((d) => {
                 const active = questDifficultyFilter.includes(d.key);
                 return (
                   <button key={d.key} onClick={() => setQuestDifficultyFilter((f) => active ? f.filter((k) => k !== d.key) : [...f, d.key])} className="qlog-btn"
-                    style={{ fontSize: 10, fontWeight: 700, padding: "4px 9px", borderRadius: 14, border: `1.5px solid ${d.color}`, background: active ? d.color : "transparent", color: active ? "#1B2430" : d.color, cursor: "pointer" }}>
+                    style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, padding: "4px 9px", borderRadius: 14, border: `1.5px solid ${d.color}`, background: active ? d.color : "transparent", color: active ? "#1B2430" : d.color, cursor: "pointer" }}>
                     {d.label}
                   </button>
                 );
               })}
               {(questSearch || questDifficultyFilter.length > 0) && (
-                <button onClick={() => { setQuestSearch(""); setQuestDifficultyFilter([]); }} className="qlog-btn" style={{ fontSize: 10, padding: "4px 9px", borderRadius: 14, border: "1px solid #33414F", background: "none", color: "#8A8578", cursor: "pointer" }}>Clear</button>
+                <button onClick={() => { setQuestSearch(""); setQuestDifficultyFilter([]); }} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "4px 9px", borderRadius: 14, border: "1px solid #33414F", background: "none", color: "#8A8578", cursor: "pointer" }}>Clear</button>
               )}
             </div>
           </div>
@@ -3518,23 +3632,23 @@ function AppContent({ user }) {
         {calView === "day" && (
          <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ padding: "10px 12px", borderBottom: "1px solid #2C3947", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: calAnchor === today ? accent : "#EDE4D3" }}>
+              <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: calAnchor === today ? accent : "#EDE4D3" }}>
                 {parseLocalDate(calAnchor).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
               </span>
               <div style={{ display: "flex", gap: 6 }}>
-<button onClick={() => { setAddDate(calAnchor); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: accent, border: "none", borderRadius: 6, padding: "5px 9px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}><Plus size={12} /> Add</button>
+<button onClick={() => { setAddDate(calAnchor); setAddModalOpen(true); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: accent, border: "none", borderRadius: 6, padding: "5px 9px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}><Plus size={12} /> Add</button>
               </div>
             </div>
             <div style={{ padding: 10, minHeight: 200 }}>
               {shifts.filter((s) => s.date === calAnchor).map((s) => (
                 <div key={s.id}
                   style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 6, padding: "8px 10px", marginBottom: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>Work Shift</div>
-                  <div style={{ fontSize: 12, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace", marginTop: 2 }}>{formatShiftTime(s.startTime)} – {formatShiftTime(s.endTime)}</div>
+                  <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: accent, textTransform: "uppercase", letterSpacing: 0.5 }}>Work Shift</div>
+                  <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace", marginTop: 2 }}>{formatShiftTime(s.startTime)} – {formatShiftTime(s.endTime)}</div>
                 </div>
               ))}
               {questsForDate(calAnchor).length === 0 && shifts.filter((s) => s.date === calAnchor).length === 0
-                ? <div style={{ textAlign: "center", padding: "40px 0", color: "#3F4B58", fontSize: 12 }}>No quests — tap Add to plan your day</div>
+                ? <div style={{ textAlign: "center", padding: "40px 0", color: "#3F4B58", fontSize: "calc(12px * var(--ui-scale, 1))" }}>No quests — tap Add to plan your day</div>
                 : questsForDate(calAnchor).map((q) => <QuestDot key={q.id} q={q} />)
               }
             </div>
@@ -3552,9 +3666,9 @@ function AppContent({ user }) {
                   return (
                     <div key={date} style={{ flex: "1 0 70px", padding: "6px 2px", textAlign: "center", borderRight: "1px solid #2C3947", background: date === selectedDate ? accent + "22" : "transparent" }}>
                       <div onClick={() => { setCalAnchor(date); setCalView("day"); }} style={{ cursor: "pointer" }}>
-                        <div style={{ fontSize: 10, color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
+                        <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: isToday ? accent : "#8A8578", fontWeight: 600, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { weekday: "narrow" })}</div>
                         <div style={{ width: 22, height: 22, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", margin: "2px auto" }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
+                          <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
                         </div>
                         {count > 0 && <div style={{ width: 6, height: 6, borderRadius: "50%", background: accent, margin: "2px auto 0" }} />}
                       </div>
@@ -3578,8 +3692,8 @@ function AppContent({ user }) {
                       {dayShifts.map((s) => (
                         <div key={s.id}
                           style={{ background: accent + "22", border: `1px solid ${accent}55`, borderLeft: `3px solid ${accent}`, borderRadius: 4, padding: "3px 4px", marginBottom: 3 }}>
-                          <div style={{ fontSize: 8, fontWeight: 700, color: accent, textTransform: "uppercase" }}>Shift</div>
-                          <div style={{ fontSize: 8, color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>{formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}</div>
+                          <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", fontWeight: 700, color: accent, textTransform: "uppercase" }}>Shift</div>
+                          <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", color: accent + "cc", fontFamily: "ui-monospace, Menlo, monospace" }}>{formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}</div>
                         </div>
                       ))}
                       {dayQuests.length === 0 && dayShifts.length === 0
@@ -3601,7 +3715,7 @@ function AppContent({ user }) {
            <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, overflow: "hidden" }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid #2C3947" }}>
                 {["M","T","W","T","F","S","S"].map((d, i) => (
-                  <div key={i} style={{ padding: "6px 0", textAlign: "center", fontSize: 10, fontWeight: 700, color: "#8A8578", borderRight: i < 6 ? "1px solid #2C3947" : "none" }}>{d}</div>
+                  <div key={i} style={{ padding: "6px 0", textAlign: "center", fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", borderRight: i < 6 ? "1px solid #2C3947" : "none" }}>{d}</div>
                 ))}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)" }}>
@@ -3623,22 +3737,22 @@ function AppContent({ user }) {
                       onClick={() => { setCalAnchor(date); setCalView("day"); }}
                       style={{ borderRight: i % 7 < 6 ? "1px solid #2C3947" : "none", borderBottom: "1px solid #2C3947", padding: "4px", minHeight: 64, cursor: "pointer", background: isOver ? accent + "28" : hasOverdue ? "rgba(138,46,68,0.12)" : isToday ? accent + "18" : "transparent", opacity: isThisMonth ? 1 : 0.4, transition: "background 0.1s ease" }}>
                       <div style={{ width: 20, height: 20, borderRadius: "50%", background: isToday ? accent : "transparent", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 2 }}>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
+                        <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: isToday ? "#1B2430" : "#EDE4D3" }}>{d.getDate()}</span>
                       </div>
                       {dayShifts.map((s) => (
-                        <div key={s.id} style={{ background: accent + "22", borderLeft: `2px solid ${accent}`, borderRadius: 3, padding: "1px 3px", marginBottom: 2, fontSize: 8, color: accent, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div key={s.id} style={{ background: accent + "22", borderLeft: `2px solid ${accent}`, borderRadius: 3, padding: "1px 3px", marginBottom: 2, fontSize: "calc(8px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {formatShiftTime(s.startTime)}–{formatShiftTime(s.endTime)}
                         </div>
                       ))}
-                      {active > 0 && <div style={{ fontSize: 9, fontWeight: 700, color: hasOverdue ? "#C1652B" : accent, lineHeight: 1.4 }}>{hasOverdue ? "⚠ " : ""}{active} quest{active !== 1 ? "s" : ""}</div>}
-                      {done > 0 && <div style={{ fontSize: 9, color: "#4C9A6A", lineHeight: 1.4 }}>✓ {done}</div>}
+                      {active > 0 && <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: hasOverdue ? "#C1652B" : accent, lineHeight: 1.4 }}>{hasOverdue ? "⚠ " : ""}{active} quest{active !== 1 ? "s" : ""}</div>}
+                      {done > 0 && <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#4C9A6A", lineHeight: 1.4 }}>✓ {done}</div>}
                       {active > 0 && (
                         <div style={{ display: "flex", gap: 2, marginTop: 2, flexWrap: "wrap" }}>
                           {dayQuests.filter((q) => !q.completed).slice(0, 4).map((q) => {
                             const d = themedDifficulties.find((df) => df.key === q.difficulty);
                             return <div key={q.id} style={{ width: 5, height: 5, borderRadius: "50%", background: d?.color || accent }} />;
                           })}
-                          {active > 4 && <div style={{ fontSize: 8, color: "#5C6773" }}>+{active - 4}</div>}
+                          {active > 4 && <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", color: "#5C6773" }}>+{active - 4}</div>}
                         </div>
                       )}
                       {dayQuests.length > 0 && (
@@ -3654,7 +3768,7 @@ function AppContent({ user }) {
           );
         })()}
 
-        {splitError && <p style={{ fontSize: 11, color: "#C1652B", textAlign: "center", marginTop: 8 }}>Couldn't split that task — try again in a moment.</p>}
+        {splitError && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#C1652B", textAlign: "center", marginTop: 8 }}>Couldn't split that task — try again in a moment.</p>}
 
         {/* Trash drop zone — appears while dragging */}
         {isDragging && (
@@ -3664,7 +3778,7 @@ function AppContent({ user }) {
             onDrop={(e) => { e.preventDefault(); const id = Number(e.dataTransfer.getData("text/plain")); deleteQuest(id); dragIdRef.current = null; setIsDragging(false); setDragOverTrash(false); }}
             style={{ margin: "10px 0", padding: "14px 0", borderRadius: 10, border: `2px dashed ${dragOverTrash ? "#B33A3A" : "#8A2E44"}`, background: dragOverTrash ? "rgba(179,58,58,0.15)" : "rgba(138,46,68,0.06)", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "all 0.15s ease", cursor: "copy" }}>
             <Trash2 size={18} color={dragOverTrash ? "#B33A3A" : "#8A2E44"} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: dragOverTrash ? "#B33A3A" : "#8A2E44" }}>Drop here to delete</span>
+            <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 600, color: dragOverTrash ? "#B33A3A" : "#8A2E44" }}>Drop here to delete</span>
           </div>
         )}
         </>
@@ -3696,11 +3810,11 @@ function AppContent({ user }) {
           {/* Daily Habits */}
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 700 }}>Daily Habits</span>
-              <span style={{ fontSize: 9, color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
+              <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700 }}>Daily Habits</span>
+              <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773" }}>{HABIT_XP} XP each · 3d bronze · 7d silver · 21d gold · 66d diamond</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 4, marginBottom: 8 }}>
-              {habits.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>No habits yet — tap + to add one.</p>}
+              {habits.length === 0 && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>No habits yet — tap + to add one.</p>}
               {habits.map((h) => {
                 const doneToday = h.lastCompletedDate === today;
                 const tier = habitTier(h.streak);
@@ -3718,24 +3832,24 @@ function AppContent({ user }) {
                     </button>
                     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, padding: "4px 8px", minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
-                      {isLate && <span style={{ fontSize: 9, fontWeight: 700, color: "#D9536A" }}>LATE</span>}
+                      <span style={{ flex: 1, fontSize: "calc(12px * var(--ui-scale, 1))", textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
+                      {isLate && <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: "#D9536A" }}>LATE</span>}
                       {h.deadlineTime && (
-                        <span title={`Due by ${formatDeadline(h.deadlineTime)}`} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: isLate ? "#D9536A" : "#8A8578" }}>
+                        <span title={`Due by ${formatDeadline(h.deadlineTime)}`} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: isLate ? "#D9536A" : "#8A8578" }}>
                           <Timer size={10} color={isLate ? "#D9536A" : "#8A8578"} /> {formatDeadline(h.deadlineTime)}
                         </span>
                       )}
                       {h.streak > 0 && (
-                        <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9, fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: tier.color, fontFamily: "ui-monospace, Menlo, monospace" }}>
                           <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
                         </span>
                       )}
-                      {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 10, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
+                      {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 10, top: -2, fontWeight: 700, fontSize: "calc(11px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
                     </div>
                     <div style={{ display: "flex", gap: 3 }}>
                       {dots.map((d, i) => (
                         <div key={d.date} title={`${DAYS[i].label} — ${d.date}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                          <span style={{ fontSize: 7, fontWeight: 700, color: d.isToday ? (tier.color || accent) : "#4A5563" }}>{DAYS[i].label[0]}</span>
+                          <span style={{ fontSize: "calc(7px * var(--ui-scale, 1))", fontWeight: 700, color: d.isToday ? (tier.color || accent) : "#4A5563" }}>{DAYS[i].label[0]}</span>
                           <div style={{ width: 12, height: 12, borderRadius: 3, opacity: d.isFuture ? 0.5 : 1, background: d.filled ? tier.color || accent : "transparent", border: d.filled ? `1.5px solid ${tier.color || accent}` : d.isFuture ? "1.5px dashed #2C3947" : d.isToday ? "1.5px solid #5C6773" : "1.5px solid #2C3947" }} />
                         </div>
                       ))}
@@ -3745,7 +3859,7 @@ function AppContent({ user }) {
                 );
               })}
               <button onClick={openAddHabitModal} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "none", border: "1.5px dashed #33414F", borderRadius: 6, padding: "4px 8px", minHeight: 58, color: "#5C6773", cursor: "pointer" }}>
-                <Plus size={14} color="#5C6773" /> <span style={{ fontSize: 12, fontWeight: 600 }}>Add habit</span>
+                <Plus size={14} color="#5C6773" /> <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600 }}>Add habit</span>
               </button>
             </div>
           </div>
@@ -3754,35 +3868,35 @@ function AppContent({ user }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 10 }}>
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Today's Progress</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{doneCount}/{habits.length}</span>
+              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Today's Progress</span>
+              <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{doneCount}/{habits.length}</span>
             </div>
             <div style={{ height: 7, background: "#141C27", borderRadius: 4, overflow: "hidden", marginBottom: 8 }}>
               <div style={{ height: "100%", width: `${habits.length ? (doneCount / habits.length) * 100 : 0}%`, background: allDoneToday ? "#4C9A6A" : accent, borderRadius: 4, transition: "width 0.3s ease" }} />
             </div>
             {perfectDayEarnedToday ? (
-              <p style={{ fontSize: 11, color: "#4C9A6A", margin: 0 }}>✓ Perfect day complete — +{PERFECT_DAY_XP} bonus XP earned!</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#4C9A6A", margin: 0 }}>✓ Perfect day complete — +{PERFECT_DAY_XP} bonus XP earned!</p>
             ) : habits.length > 0 ? (
-              <p style={{ fontSize: 11, color: "#8A8578", margin: 0 }}>Complete all {habits.length} for a +{PERFECT_DAY_XP} XP perfect-day bonus.</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", margin: 0 }}>Complete all {habits.length} for a +{PERFECT_DAY_XP} XP perfect-day bonus.</p>
             ) : null}
           </div>
 
           {/* Streak stats + tier legend */}
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Streaks</div>
+            <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Streaks</div>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: bestHabit?.streak > 0 ? "#C1652B" : "#5C6773", fontFamily: "ui-monospace, Menlo, monospace" }}>{bestHabit?.streak > 0 ? `${bestHabit.streak}d` : "—"}</div>
-                <div style={{ fontSize: 10, color: "#5C6773" }}>{bestHabit?.streak > 0 ? `Best: ${bestHabit.name}` : "No active streaks"}</div>
+                <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: bestHabit?.streak > 0 ? "#C1652B" : "#5C6773", fontFamily: "ui-monospace, Menlo, monospace" }}>{bestHabit?.streak > 0 ? `${bestHabit.streak}d` : "—"}</div>
+                <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{bestHabit?.streak > 0 ? `Best: ${bestHabit.name}` : "No active streaks"}</div>
               </div>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{totalCompletions}</div>
-                <div style={{ fontSize: 10, color: "#5C6773" }}>Total completions</div>
+                <div style={{ fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>{totalCompletions}</div>
+                <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>Total completions</div>
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {tiers.map((t) => (
-                <span key={t.label} style={{ fontSize: 9, fontWeight: 700, color: t.color, background: t.color + "18", border: `1px solid ${t.color}44`, borderRadius: 12, padding: "3px 8px" }}>{t.label} · {t.days}d+</span>
+                <span key={t.label} style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: t.color, background: t.color + "18", border: `1px solid ${t.color}44`, borderRadius: 12, padding: "3px 8px" }}>{t.label} · {t.days}d+</span>
               ))}
             </div>
           </div>
@@ -3791,17 +3905,17 @@ function AppContent({ user }) {
           {/* 30-day consistency heatmap */}
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>This Month</span>
+              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>This Month</span>
               <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <span style={{ fontSize: 8, color: "#5C6773" }}>Less</span>
+                <span style={{ fontSize: "calc(8px * var(--ui-scale, 1))", color: "#5C6773" }}>Less</span>
                 {[0.001, 0.34, 0.67, 1].map((r) => (
                   <div key={r} style={{ width: 6, height: 6, borderRadius: 2, background: r === 0.001 ? "#141C27" : accent, opacity: r === 0.001 ? 1 : Math.max(0.25, r) }} />
                 ))}
-                <span style={{ fontSize: 8, color: "#5C6773" }}>More</span>
+                <span style={{ fontSize: "calc(8px * var(--ui-scale, 1))", color: "#5C6773" }}>More</span>
               </div>
             </div>
             {habits.length === 0 ? (
-              <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Add a habit to start tracking consistency.</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>Add a habit to start tracking consistency.</p>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: `repeat(${thisMonthDays.length}, 1fr)`, gap: 3 }}>
                 {thisMonthDays.map((d, i) => {
@@ -3809,7 +3923,7 @@ function AppContent({ user }) {
                   const showLabel = dayNum === 1 || dayNum === thisMonthDays.length || dayNum % 5 === 0;
                   return (
                     <div key={d.date} title={`${d.date}: ${d.done}/${habits.length} habits`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
-                      <span style={{ fontSize: 7, fontWeight: 700, color: d.date === today ? accent : "#4A5563", visibility: showLabel ? "visible" : "hidden", whiteSpace: "nowrap", lineHeight: 1 }}>{dayNum}</span>
+                      <span style={{ fontSize: "calc(7px * var(--ui-scale, 1))", fontWeight: 700, color: d.date === today ? accent : "#4A5563", visibility: showLabel ? "visible" : "hidden", whiteSpace: "nowrap", lineHeight: 1 }}>{dayNum}</span>
                       <div style={{ width: "100%", aspectRatio: "1 / 1", borderRadius: 2, opacity: d.isFuture ? 0.35 : d.ratio > 0 ? Math.max(0.3, d.ratio) : 1, background: !d.isFuture && d.ratio > 0 ? accent : "#141C27", border: d.date === today ? `1px solid ${accent}` : d.isFuture ? "1px dashed #2C3947" : "1px solid transparent" }} />
                     </div>
                   );
@@ -3821,7 +3935,7 @@ function AppContent({ user }) {
           {/* Next milestones */}
           {habits.some((h) => h.streak > 0 && nextHabitMilestone(h.streak)) && (
            <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Next Milestones</div>
+              <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Next Milestones</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {habits
                   .filter((h) => h.streak > 0 && nextHabitMilestone(h.streak))
@@ -3833,7 +3947,7 @@ function AppContent({ user }) {
                     const pct = ((h.streak - prevThreshold) / (next - prevThreshold)) * 100;
                     return (
                       <div key={h.id}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(11px * var(--ui-scale, 1))", marginBottom: 3 }}>
                           <span style={{ color: "#EDE4D3" }}>{h.name}</span>
                           <span style={{ color: tier.color, fontWeight: 700 }}>{next - h.streak}d to {tier.label}</span>
                         </div>
@@ -3855,29 +3969,10 @@ function AppContent({ user }) {
           <div style={{ marginBottom: 20 }}>
             {(() => {
               const rankRows = computeExerciseRankRows(workoutHistory, customExercises);
-              const overall = computeOverallRank(rankRows) || { info: rankInfo(-1) };
-              const top = [...rankRows].sort((a, b) => (b.idx + b.progress) - (a.idx + a.progress)).slice(0, 3);
-              return (
-                <button onClick={() => setActiveWorkoutTab("ranks")} className="qlog-btn" style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "9px 12px", marginBottom: 10, cursor: "pointer", textAlign: "left" }}>
-                  {overall.info.unranked ? <IconShield size={18} color={overall.info.color} style={{ flexShrink: 0 }} /> : <RankShieldIcon tierIndex={overall.info.tierIdx} numeral={overall.info.sub} color={overall.info.color} size={20} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: overall.info.color }}>{overall.info.label}</span>
-                      <span style={{ fontSize: 9, color: "#5C6773", textTransform: "uppercase", letterSpacing: 0.4 }}>Overall Rank</span>
-                    </div>
-                    {top.length > 0 ? (
-                      <div style={{ fontSize: 10, color: "#8A8578", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        Best: {top.map((r) => r.ex?.name || "?").join(", ")}
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 10, color: "#5C6773" }}>Complete a workout to start earning ranks</div>
-                    )}
-                  </div>
-                  <ChevronRight size={14} color="#5C6773" style={{ flexShrink: 0 }} />
-                </button>
-              );
+              const overall = computeOverallRank(rankRows);
+              return <OverallRankCard overall={overall} rankBonusPct={rankBonusPct} onClick={() => setActiveWorkoutTab("ranks")} />;
             })()}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, marginBottom: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: 4 }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 2 }}>
               {[
                 { key: "today", label: "Today", Icon: Target },
                 { key: "plans", label: "Plans", Icon: FileText },
@@ -3890,8 +3985,8 @@ function AppContent({ user }) {
                 const on = activeWorkoutTab === t.key;
                 return (
                   <button key={t.key} onClick={() => { setActiveWorkoutTab(t.key); setHistoryExerciseId(null); }} className="qlog-btn"
-                    style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3, fontSize: 10, fontWeight: 700, padding: "8px 2px", borderRadius: 8, border: "none", background: on ? accent : "transparent", color: on ? "#1B2430" : "#8A8578", cursor: "pointer", transition: "background 0.15s, color 0.15s" }}>
-                    <t.Icon size={15} />
+                    style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 5, fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, padding: "7px 12px", borderRadius: 20, border: `1px solid ${on ? accent : "#2C3947"}`, background: on ? accent : "#1F2836", color: on ? "#1B2430" : "#8A8578", cursor: "pointer", transition: "background 0.15s, color 0.15s", whiteSpace: "nowrap" }}>
+                    <t.Icon size={13} />
                     {t.label}
                   </button>
                 );
@@ -3908,30 +4003,30 @@ function AppContent({ user }) {
                   {workoutSession && (
                     <div style={{ background: "rgba(201,162,39,0.1)", border: `1px solid ${accent}`, borderRadius: 10, padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: accent }}>Workout in progress</div>
-                        <div style={{ fontSize: 10, color: "#8A8578" }}>{workoutSession.planName}</div>
+                        <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: accent }}>Workout in progress</div>
+                        <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>{workoutSession.planName}</div>
                       </div>
-                      <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Resume</button>
+                      <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "6px 12px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Resume</button>
                     </div>
                   )}
                   {!todayPlan && (
                     <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "24px 14px", textAlign: "center" }}>
                       <IconDumbbell size={26} color="#5C6773" style={{ marginBottom: 8 }} />
-                      <p style={{ fontSize: 13, color: "#8A8578", margin: 0 }}>No workout scheduled for today.</p>
-                      <button onClick={() => setActiveWorkoutTab("schedule")} className="qlog-btn" style={{ marginTop: 10, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 14px", fontSize: 12, color: accent, cursor: "pointer" }}>Set up split</button>
+                      <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", margin: 0 }}>No workout scheduled for today.</p>
+                      <button onClick={() => setActiveWorkoutTab("schedule")} className="qlog-btn" style={{ marginTop: 10, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 14px", fontSize: "calc(12px * var(--ui-scale, 1))", color: accent, cursor: "pointer" }}>Set up split</button>
                     </div>
                   )}
                   {todayPlan && (
                     <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                        <span style={{ fontSize: 14, fontWeight: 700 }}>{todayPlan.name}</span>
-                        <span style={{ fontSize: 10, color: "#5C6773" }}>{todayPlan.exercises.length} exercises · ~{estimateWorkoutMinutes(todayPlan)} min</span>
+                        <span style={{ fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700 }}>{todayPlan.name}</span>
+                        <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{todayPlan.exercises.length} exercises · ~{estimateWorkoutMinutes(todayPlan)} min</span>
                       </div>
                       {muscleVolume.length > 0 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
                           {muscleVolume.slice(0, 5).map((m) => (
                             <div key={m.muscle} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <span style={{ fontSize: 10, color: "#8A8578", width: 72, flexShrink: 0 }}>{MUSCLE_LABELS[m.muscle]}</span>
+                              <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", width: 72, flexShrink: 0 }}>{MUSCLE_LABELS[m.muscle]}</span>
                               <div style={{ flex: 1, height: 5, background: "#141C27", borderRadius: 3, overflow: "hidden" }}>
                                 <div style={{ height: "100%", width: `${(m.volume / maxVol) * 100}%`, background: accent, borderRadius: 3 }} />
                               </div>
@@ -3943,7 +4038,7 @@ function AppContent({ user }) {
                         {todayPlan.exercises.map((pe) => {
                           const ex = findExercise(pe.exerciseId, customExercises);
                           return (
-                            <div key={pe.id} style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <div key={pe.id} style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>{ex?.name || "?"} <InfoButton accent={accent} size={11} onClick={() => openExerciseGuide(ex)} /></span>
                               <span style={{ color: "#5C6773" }}>{pe.sets} × {pe.targetReps}{pe.targetWeight ? ` @ ${pe.targetWeight}` : ""}</span>
                             </div>
@@ -3951,7 +4046,7 @@ function AppContent({ user }) {
                         })}
                       </div>
                       {!workoutSession && (
-                        <button onClick={() => startWorkout(todayPlan)} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer" }}>Start Workout</button>
+                        <button onClick={() => startWorkout(todayPlan)} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>Start Workout</button>
                       )}
                     </div>
                   )}
@@ -3961,7 +4056,7 @@ function AppContent({ user }) {
 
             {activeWorkoutTab === "plans" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {workoutPlans.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center" }}>No plans yet — create one below.</p>}
+                {workoutPlans.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", textAlign: "center" }}>No plans yet — create one below.</p>}
                 {workoutPlans.map((plan) => {
                   const isEditing = editingPlanId === plan.id;
                   const muscleVolume = summarizeMuscleVolume(plan.exercises, customExercises);
@@ -3969,14 +4064,14 @@ function AppContent({ user }) {
                     <div key={plan.id} className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "10px 14px" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                         <button onClick={() => setEditingPlanId(isEditing ? null : plan.id)} className="qlog-btn" style={{ background: "none", border: "none", cursor: "pointer", textAlign: "left", flex: 1, padding: 0 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>{plan.name}</span>
-                          <span style={{ fontSize: 10, color: "#5C6773", marginLeft: 8 }}>{plan.exercises.length} exercises · ~{estimateWorkoutMinutes(plan)} min</span>
+                          <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>{plan.name}</span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", marginLeft: 8 }}>{plan.exercises.length} exercises · ~{estimateWorkoutMinutes(plan)} min</span>
                         </button>
                         <button onClick={() => deleteWorkoutPlan(plan.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563", padding: 2 }}><Trash2 size={13} /></button>
                       </div>
                       {muscleVolume.length > 0 && (
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
-                          {muscleVolume.slice(0, 4).map((m) => <span key={m.muscle} style={{ fontSize: 9, color: accent, background: accent + "18", borderRadius: 10, padding: "2px 7px" }}>{MUSCLE_LABELS[m.muscle]}</span>)}
+                          {muscleVolume.slice(0, 4).map((m) => <span key={m.muscle} style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: accent, background: accent + "18", borderRadius: 10, padding: "2px 7px" }}>{MUSCLE_LABELS[m.muscle]}</span>)}
                         </div>
                       )}
                       {isEditing && (
@@ -3986,26 +4081,26 @@ function AppContent({ user }) {
                             return (
                              <div key={pe.id} className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "6px 8px" }}>
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                                  <span style={{ fontSize: 12, color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex?.name || "?"} <InfoButton accent={accent} size={11} onClick={() => openExerciseGuide(ex)} /></span>
+                                  <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", display: "flex", alignItems: "center", gap: 6 }}>{ex?.name || "?"} <InfoButton accent={accent} size={11} onClick={() => openExerciseGuide(ex)} /></span>
                                   <button onClick={() => removePlanExercise(plan.id, pe.id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><X size={12} /></button>
                                 </div>
                                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Sets <input type="number" min="1" value={pe.sets} onChange={(e) => updatePlanExercise(plan.id, pe.id, { sets: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 40, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
-                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Reps <input value={pe.targetReps} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetReps: e.target.value })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
-                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Rest(s) <input type="number" min="0" value={pe.restSeconds} onChange={(e) => updatePlanExercise(plan.id, pe.id, { restSeconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
-                                  <label style={{ fontSize: 9, color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Weight <input type="number" min="0" step="0.5" value={pe.targetWeight || ""} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetWeight: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="0" style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Sets <input type="number" min="1" value={pe.sets} onChange={(e) => updatePlanExercise(plan.id, pe.id, { sets: Math.max(1, Number(e.target.value) || 1) })} style={{ width: 40, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Reps <input value={pe.targetReps} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetReps: e.target.value })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Rest(s) <input type="number" min="0" value={pe.restSeconds} onChange={(e) => updatePlanExercise(plan.id, pe.id, { restSeconds: Math.max(0, Number(e.target.value) || 0) })} style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
+                                  <label style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", display: "flex", alignItems: "center", gap: 4 }}>Weight <input type="number" min="0" step="0.5" value={pe.targetWeight || ""} onChange={(e) => updatePlanExercise(plan.id, pe.id, { targetWeight: e.target.value === "" ? "" : Math.max(0, Number(e.target.value) || 0) })} placeholder="0" style={{ width: 50, background: "#141C27", border: "1px solid #33414F", borderRadius: 4, color: "#EDE4D3", padding: "3px 5px" }} /></label>
                                 </div>
                               </div>
                             );
                           })}
-                          <button onClick={() => setExercisePickerFor(plan.id)} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: 12, color: accent, cursor: "pointer" }}>+ Add Exercise</button>
+                          <button onClick={() => setExercisePickerFor(plan.id)} className="qlog-btn" style={{ background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "7px 0", fontSize: "calc(12px * var(--ui-scale, 1))", color: accent, cursor: "pointer" }}>+ Add Exercise</button>
                         </div>
                       )}
                     </div>
                   );
                 })}
                 <div style={{ display: "flex", gap: 6 }}>
-                  <input value={newPlanName} onChange={(e) => setNewPlanName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addWorkoutPlan(newPlanName)} placeholder="New plan — e.g. Push Day" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "7px 10px", color: "#EDE4D3", fontSize: 12 }} />
+                  <input value={newPlanName} onChange={(e) => setNewPlanName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addWorkoutPlan(newPlanName)} placeholder="New plan — e.g. Push Day" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "7px 10px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
                   <button onClick={() => addWorkoutPlan(newPlanName)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "0 10px", display: "flex", alignItems: "center", cursor: "pointer" }}><Plus size={14} color="#1B2430" /></button>
                 </div>
               </div>
@@ -4013,19 +4108,19 @@ function AppContent({ user }) {
 
             {activeWorkoutTab === "schedule" && (
               <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-                <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 10px" }}>Assign a plan to each weekday — it repeats every week.</p>
+                <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 10px" }}>Assign a plan to each weekday — it repeats every week.</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   {DAYS.map((d) => (
                     <div key={d.key} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ width: 36, fontSize: 12, fontWeight: 700, color: d.key === currentDayKey() ? accent : "#8A8578" }}>{d.label}</span>
-                      <select value={workoutSchedule[d.key] || ""} onChange={(e) => setScheduleDay(d.key, e.target.value ? Number(e.target.value) : null)} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
+                      <span style={{ width: 36, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: d.key === currentDayKey() ? accent : "#8A8578" }}>{d.label}</span>
+                      <select value={workoutSchedule[d.key] || ""} onChange={(e) => setScheduleDay(d.key, e.target.value ? Number(e.target.value) : null)} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                         <option value="">Rest day</option>
                         {workoutPlans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                     </div>
                   ))}
                 </div>
-                {workoutPlans.length === 0 && <p style={{ fontSize: 11, color: "#5C6773", marginTop: 10, marginBottom: 0 }}>Create a plan first in the Plans tab.</p>}
+                {workoutPlans.length === 0 && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 10, marginBottom: 0 }}>Create a plan first in the Plans tab.</p>}
               </div>
             )}
 
@@ -4051,17 +4146,17 @@ function AppContent({ user }) {
                 const linePoints = points.map((p, i) => `${padX + i * stepX},${yFor(p.weight)}`).join(" ");
                 return (
                   <div>
-                    <button onClick={() => setHistoryExerciseId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All exercises</button>
+                    <button onClick={() => setHistoryExerciseId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))", marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All exercises</button>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700 }}>{ex?.name || "Exercise"}</span>
+                      <span style={{ fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700 }}>{ex?.name || "Exercise"}</span>
                       <InfoButton accent={accent} onClick={() => openExerciseGuide(ex)} />
                     </div>
-                    {points.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No history for this exercise yet.</p>}
+                    {points.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No history for this exercise yet.</p>}
                     {points.length > 0 && (
                      <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 10px 6px", marginBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Weight progress</span>
-                          <span style={{ fontSize: 11, color: accent, fontWeight: 700 }}>PR {prWeight}{points[points.length - 1]?.weight === prWeight ? " 🔥" : ""}</span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Weight progress</span>
+                          <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: accent, fontWeight: 700 }}>PR {prWeight}{points[points.length - 1]?.weight === prWeight ? " 🔥" : ""}</span>
                         </div>
                         {points.length > 1 ? (
                           <svg viewBox={`0 0 ${chartW} ${chartH}`} width="100%" height={chartH} preserveAspectRatio="none">
@@ -4071,7 +4166,7 @@ function AppContent({ user }) {
                             ))}
                           </svg>
                         ) : (
-                          <p style={{ fontSize: 11, color: "#5C6773", margin: "4px 0 8px" }}>Log another session to see a trend line.</p>
+                          <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "4px 0 8px" }}>Log another session to see a trend line.</p>
                         )}
                       </div>
                     )}
@@ -4082,9 +4177,9 @@ function AppContent({ user }) {
                         const volume = entry.sets.reduce((v, s) => v + s.weight * s.reps, 0);
                         return (
                           <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
-                            <span style={{ fontSize: 11, color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
-                            <span style={{ fontSize: 12, color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{best ? `${best.weight} × ${best.reps}` : "-"}{best?.weight === prWeight && prWeight > 0 ? " 🏆" : ""}</span>
-                            <span style={{ fontSize: 10, color: accent }}>{volume} vol</span>
+                            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontFamily: "ui-monospace, Menlo, monospace" }}>{best ? `${best.weight} × ${best.reps}` : "-"}{best?.weight === prWeight && prWeight > 0 ? " 🏆" : ""}</span>
+                            <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: accent }}>{volume} vol</span>
                           </div>
                         );
                       })}
@@ -4094,40 +4189,40 @@ function AppContent({ user }) {
               })() : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>By exercise</div>
+                    <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>By exercise</div>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {[...new Set(workoutHistory.flatMap((h) => h.exercises.map((e) => e.exerciseId)))].map((exId) => {
                         const ex = findExercise(exId, customExercises);
-                        return <button key={exId} onClick={() => setHistoryExerciseId(exId)} className="qlog-btn" style={{ fontSize: 11, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 16, padding: "5px 10px", color: "#8A8578", cursor: "pointer" }}>{ex?.name || "?"}</button>;
+                        return <button key={exId} onClick={() => setHistoryExerciseId(exId)} className="qlog-btn" style={{ fontSize: "calc(11px * var(--ui-scale, 1))", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 16, padding: "5px 10px", color: "#8A8578", cursor: "pointer" }}>{ex?.name || "?"}</button>;
                       })}
-                      {workoutHistory.length === 0 && <span style={{ fontSize: 11, color: "#5C6773" }}>Complete a workout to see progress here.</span>}
+                      {workoutHistory.length === 0 && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Complete a workout to see progress here.</span>}
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sessions</div>
+                    <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sessions</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {workoutHistory.map((h) => (
                        <div key={h.id} className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
                           <div onClick={() => setExpandedHistoryId(expandedHistoryId === h.id ? null : h.id)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
                             <div>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3" }}>{h.planName}</div>
-                              <div style={{ fontSize: 10, color: "#5C6773" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} · {fmtTime(h.durationSeconds)} · {h.totalVolume} vol</div>
+                              <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>{h.planName}</div>
+                              <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })} · {fmtTime(h.durationSeconds)} · {h.totalVolume} vol</div>
                             </div>
                             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{h.xpEarned} XP</span>
+                              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{h.xpEarned} XP</span>
                               <button onClick={(e) => { e.stopPropagation(); deleteWorkoutHistoryEntry(h.id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#4A5563" }}><Trash2 size={12} /></button>
                             </div>
                           </div>
                           {expandedHistoryId === h.id && (
                             <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
                               {h.exercises.map((e, i) => (
-                                <div key={i} style={{ fontSize: 11, color: "#8A8578" }}>{e.name}: {e.sets.map((s, j) => <span key={j} style={{ marginRight: 6, fontFamily: "ui-monospace, Menlo, monospace" }}>{s.weight}×{s.reps}</span>)}</div>
+                                <div key={i} style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>{e.name}: {e.sets.map((s, j) => <span key={j} style={{ marginRight: 6, fontFamily: "ui-monospace, Menlo, monospace" }}>{s.weight}×{s.reps}</span>)}</div>
                               ))}
                             </div>
                           )}
                         </div>
                       ))}
-                      {workoutHistory.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No workouts completed yet.</p>}
+                      {workoutHistory.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No workouts completed yet.</p>}
                     </div>
                   </div>
                 </div>
@@ -4139,13 +4234,13 @@ function AppContent({ user }) {
                 {!aiPreview && (
                  <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipment you have</div>
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipment you have</div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {EQUIPMENT_TYPES.map((eq) => {
                           const on = aiEquipment.includes(eq);
                           return (
                             <button key={eq} onClick={() => setAiEquipment((cur) => on ? cur.filter((e) => e !== eq) : [...cur, eq])} className="qlog-btn"
-                              style={{ fontSize: 11, background: on ? accent : "#141C27", border: `1px solid ${on ? accent : "#33414F"}`, borderRadius: 16, padding: "5px 10px", color: on ? "#1B2430" : "#8A8578", cursor: "pointer", fontWeight: on ? 700 : 400 }}>
+                              style={{ fontSize: "calc(11px * var(--ui-scale, 1))", background: on ? accent : "#141C27", border: `1px solid ${on ? accent : "#33414F"}`, borderRadius: 16, padding: "5px 10px", color: on ? "#1B2430" : "#8A8578", cursor: "pointer", fontWeight: on ? 700 : 400 }}>
                               {EQUIPMENT_LABELS[eq] || eq}
                             </button>
                           );
@@ -4154,11 +4249,11 @@ function AppContent({ user }) {
                     </div>
 
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Days per week</div>
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Days per week</div>
                       <div style={{ display: "flex", gap: 6 }}>
                         {[2, 3, 4, 5, 6].map((n) => (
                           <button key={n} onClick={() => setAiDaysPerWeek(n)} className="qlog-btn"
-                            style={{ flex: 1, fontSize: 12, fontWeight: 700, background: aiDaysPerWeek === n ? accent : "#141C27", border: `1px solid ${aiDaysPerWeek === n ? accent : "#33414F"}`, borderRadius: 8, padding: "8px 0", color: aiDaysPerWeek === n ? "#1B2430" : "#8A8578", cursor: "pointer" }}>
+                            style={{ flex: 1, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, background: aiDaysPerWeek === n ? accent : "#141C27", border: `1px solid ${aiDaysPerWeek === n ? accent : "#33414F"}`, borderRadius: 8, padding: "8px 0", color: aiDaysPerWeek === n ? "#1B2430" : "#8A8578", cursor: "pointer" }}>
                             {n}
                           </button>
                         ))}
@@ -4167,8 +4262,8 @@ function AppContent({ user }) {
 
                     <div style={{ display: "flex", gap: 10 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Split</div>
-                        <select value={aiSplitType} onChange={(e) => setAiSplitType(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: 12 }}>
+                        <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Split</div>
+                        <select value={aiSplitType} onChange={(e) => setAiSplitType(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                           <option value="auto">Auto</option>
                           <option value="full_body">Full Body</option>
                           <option value="upper_lower">Upper/Lower</option>
@@ -4177,8 +4272,8 @@ function AppContent({ user }) {
                         </select>
                       </div>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Experience</div>
-                        <select value={aiExperience} onChange={(e) => setAiExperience(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: 12 }}>
+                        <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Experience</div>
+                        <select value={aiExperience} onChange={(e) => setAiExperience(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                           <option value="beginner">Beginner</option>
                           <option value="intermediate">Intermediate</option>
                           <option value="advanced">Advanced</option>
@@ -4187,8 +4282,8 @@ function AppContent({ user }) {
                     </div>
 
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Goal</div>
-                      <select value={aiGoal} onChange={(e) => setAiGoal(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: 12 }}>
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Goal</div>
+                      <select value={aiGoal} onChange={(e) => setAiGoal(e.target.value)} style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                         <option value="general">General fitness</option>
                         <option value="strength">Strength</option>
                         <option value="hypertrophy">Muscle growth</option>
@@ -4197,9 +4292,9 @@ function AppContent({ user }) {
                       </select>
                     </div>
 
-                    {aiError && <p style={{ fontSize: 12, color: "#C1652B", margin: 0 }}>{aiError}</p>}
+                    {aiError && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#C1652B", margin: 0 }}>{aiError}</p>}
 
-                    <button onClick={handleGenerateWorkout} disabled={aiGenerating} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: aiGenerating ? "default" : "pointer", opacity: aiGenerating ? 0.6 : 1 }}>
+                    <button onClick={handleGenerateWorkout} disabled={aiGenerating} className="qlog-btn" style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#1B2430", cursor: aiGenerating ? "default" : "pointer", opacity: aiGenerating ? 0.6 : 1 }}>
                       {aiGenerating ? "Generating..." : "✨ Generate Plan"}
                     </button>
                   </div>
@@ -4210,12 +4305,12 @@ function AppContent({ user }) {
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {aiPreview.plans.map((p, i) => (
                        <div key={i} className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>{p.name}</div>
+                          <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, marginBottom: 6 }}>{p.name}</div>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                             {p.exercises.map((ex, j) => {
                               const exInfo = findExercise(ex.exerciseId, customExercises);
                               return (
-                                <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578" }}>
+                                <div key={j} style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>
                                   <span>{exInfo?.name || ex.exerciseId}</span>
                                   <span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "#EDE4D3" }}>{ex.sets} × {ex.targetReps}</span>
                                 </div>
@@ -4227,10 +4322,10 @@ function AppContent({ user }) {
                     </div>
 
                    <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Weekly Schedule</div>
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Weekly Schedule</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                         {DAYS.map((d) => (
-                          <div key={d.key} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <div key={d.key} style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                             <span style={{ color: "#8A8578" }}>{d.label}</span>
                             <span style={{ color: aiPreview.schedule[d.key] ? accent : "#5C6773" }}>{aiPreview.schedule[d.key] || "Rest"}</span>
                           </div>
@@ -4239,8 +4334,8 @@ function AppContent({ user }) {
                     </div>
 
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => setAiPreview(null)} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 12, color: "#8A8578", cursor: "pointer" }}>Discard</button>
-                      <button onClick={applyGeneratedWorkout} className="qlog-btn" style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}>Apply Plan</button>
+                      <button onClick={() => setAiPreview(null)} className="qlog-btn" style={{ flex: 1, background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Discard</button>
+                      <button onClick={applyGeneratedWorkout} className="qlog-btn" style={{ flex: 1, background: accent, border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>Apply Plan</button>
                     </div>
                   </div>
                 )}
@@ -4256,34 +4351,34 @@ function AppContent({ user }) {
               );
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <input value={exerciseBrowseFilter.q} onChange={(e) => setExerciseBrowseFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search exercises..." style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+                  <input value={exerciseBrowseFilter.q} onChange={(e) => setExerciseBrowseFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search exercises..." style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    <button onClick={() => setExerciseBrowseFilter((f) => ({ ...f, muscle: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exerciseBrowseFilter.muscle ? accent : "#33414F"}`, background: !exerciseBrowseFilter.muscle ? accent : "transparent", color: !exerciseBrowseFilter.muscle ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All muscles</button>
+                    <button onClick={() => setExerciseBrowseFilter((f) => ({ ...f, muscle: null }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exerciseBrowseFilter.muscle ? accent : "#33414F"}`, background: !exerciseBrowseFilter.muscle ? accent : "transparent", color: !exerciseBrowseFilter.muscle ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All muscles</button>
                     {MUSCLE_GROUPS.map((m) => (
-                      <button key={m} onClick={() => setExerciseBrowseFilter((f) => ({ ...f, muscle: f.muscle === m ? null : m }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exerciseBrowseFilter.muscle === m ? accent : "#33414F"}`, background: exerciseBrowseFilter.muscle === m ? accent : "transparent", color: exerciseBrowseFilter.muscle === m ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{MUSCLE_LABELS[m]}</button>
+                      <button key={m} onClick={() => setExerciseBrowseFilter((f) => ({ ...f, muscle: f.muscle === m ? null : m }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${exerciseBrowseFilter.muscle === m ? accent : "#33414F"}`, background: exerciseBrowseFilter.muscle === m ? accent : "transparent", color: exerciseBrowseFilter.muscle === m ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{MUSCLE_LABELS[m]}</button>
                     ))}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    <button onClick={() => setExerciseBrowseFilter((f) => ({ ...f, equipment: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exerciseBrowseFilter.equipment ? accent : "#33414F"}`, background: !exerciseBrowseFilter.equipment ? accent : "transparent", color: !exerciseBrowseFilter.equipment ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All equipment</button>
+                    <button onClick={() => setExerciseBrowseFilter((f) => ({ ...f, equipment: null }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exerciseBrowseFilter.equipment ? accent : "#33414F"}`, background: !exerciseBrowseFilter.equipment ? accent : "transparent", color: !exerciseBrowseFilter.equipment ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All equipment</button>
                     {EQUIPMENT_TYPES.map((eq) => (
-                      <button key={eq} onClick={() => setExerciseBrowseFilter((f) => ({ ...f, equipment: f.equipment === eq ? null : eq }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exerciseBrowseFilter.equipment === eq ? accent : "#33414F"}`, background: exerciseBrowseFilter.equipment === eq ? accent : "transparent", color: exerciseBrowseFilter.equipment === eq ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{EQUIPMENT_LABELS[eq]}</button>
+                      <button key={eq} onClick={() => setExerciseBrowseFilter((f) => ({ ...f, equipment: f.equipment === eq ? null : eq }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${exerciseBrowseFilter.equipment === eq ? accent : "#33414F"}`, background: exerciseBrowseFilter.equipment === eq ? accent : "transparent", color: exerciseBrowseFilter.equipment === eq ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{EQUIPMENT_LABELS[eq]}</button>
                     ))}
                   </div>
-                  <div style={{ fontSize: 10, color: "#5C6773" }}>{filtered.length} exercise{filtered.length === 1 ? "" : "s"}</div>
+                  <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773" }}>{filtered.length} exercise{filtered.length === 1 ? "" : "s"}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     {filtered.map((ex) => (
                       <div key={ex.id} style={{ display: "flex", flexDirection: "column", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 4 }}>
-                          <div style={{ fontSize: 12, color: "#EDE4D3", fontWeight: 600, lineHeight: 1.25 }}>{ex.name}</div>
+                          <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: 600, lineHeight: 1.25 }}>{ex.name}</div>
                           <InfoButton accent={accent} size={12} onClick={() => openExerciseGuide(ex)} />
                         </div>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {ex.muscleGroups.slice(0, 2).map((m) => <span key={m} style={{ fontSize: 9, color: accent, background: accent + "18", borderRadius: 10, padding: "1px 6px" }}>{MUSCLE_LABELS[m]}</span>)}
+                          {ex.muscleGroups.slice(0, 2).map((m) => <span key={m} style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: accent, background: accent + "18", borderRadius: 10, padding: "1px 6px" }}>{MUSCLE_LABELS[m]}</span>)}
                         </div>
-                        <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
+                        <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
                       </div>
                     ))}
-                    {filtered.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", gridColumn: "1 / -1" }}>No exercises match those filters.</p>}
+                    {filtered.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", gridColumn: "1 / -1" }}>No exercises match those filters.</p>}
                   </div>
                 </div>
               );
@@ -4291,15 +4386,14 @@ function AppContent({ user }) {
 
             {activeWorkoutTab === "ranks" && (() => {
               const rows = computeExerciseRankRows(workoutHistory, customExercises);
-              const overall = computeOverallRank(rows);
 
               if (rankLeaderboardId) {
                 const row = rows.find((r) => r.id === rankLeaderboardId);
                 if (!row) {
                   return (
                     <div>
-                      <button onClick={() => setRankLeaderboardId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, padding: 0 }}><ChevronLeft size={14} /> All ranks</button>
-                      <p style={{ fontSize: 12, color: "#5C6773", marginTop: 10 }}>No rank data for that exercise yet.</p>
+                      <button onClick={() => setRankLeaderboardId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))", padding: 0 }}><ChevronLeft size={14} /> All ranks</button>
+                      <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 10 }}>No rank data for that exercise yet.</p>
                     </div>
                   );
                 }
@@ -4314,19 +4408,19 @@ function AppContent({ user }) {
                 const medals = ["🥇", "🥈", "🥉"];
                 return (
                   <div>
-                    <button onClick={() => setRankLeaderboardId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All ranks</button>
+                    <button onClick={() => setRankLeaderboardId(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))", marginBottom: 10, padding: 0 }}><ChevronLeft size={14} /> All ranks</button>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                      <span style={{ fontSize: 14, fontWeight: 700 }}>{row.ex?.name || "Exercise"}</span>
+                      <span style={{ fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700 }}>{row.ex?.name || "Exercise"}</span>
                       <InfoButton accent={accent} onClick={() => openExerciseGuide(row.ex)} />
                     </div>
-                    <div style={{ fontSize: 10, color: "#5C6773", marginBottom: 10 }}>Ranked by {row.profile?.mode === "reps" ? "best reps" : "estimated 1-rep max"}. Friend scores use their last 10 synced sessions.</div>
+                    <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", marginBottom: 10 }}>Ranked by {row.profile?.mode === "reps" ? "best reps" : "estimated 1-rep max"}. Friend scores use their last 10 synced sessions.</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {entries.map((e, i) => (
                         <div key={e.uid} style={{ display: "flex", alignItems: "center", gap: 10, background: e.isSelf ? `${accent}14` : "#1F2836", border: `1px solid ${e.isSelf ? accent : "#2C3947"}`, borderRadius: 8, padding: "8px 10px" }}>
-                          <span style={{ fontSize: 13, width: 22, textAlign: "center", flexShrink: 0 }}>{e.info.unranked ? <IconShield size={13} color={UNRANKED_COLOR} /> : (medals[i] || `#${i + 1}`)}</span>
-                          <span style={{ flex: 1, fontSize: 12, color: "#EDE4D3", fontWeight: e.isSelf ? 700 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.isSelf ? `${e.username} (you)` : e.username}</span>
-                          <span style={{ fontSize: 10, fontWeight: 700, color: e.info.color, background: e.info.color + "22", borderRadius: 10, padding: "2px 8px", flexShrink: 0 }}>{e.info.label}</span>
-                          <span style={{ fontSize: 11, color: "#8A8578", fontFamily: "ui-monospace, Menlo, monospace", flexShrink: 0, width: 44, textAlign: "right" }}>{e.info.unranked ? "—" : Math.round(e.score)}</span>
+                          <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", width: 22, textAlign: "center", flexShrink: 0 }}>{e.info.unranked ? <IconShield size={13} color={UNRANKED_COLOR} /> : (medals[i] || `#${i + 1}`)}</span>
+                          <span style={{ flex: 1, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: e.isSelf ? 700 : 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.isSelf ? `${e.username} (you)` : e.username}</span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: e.info.color, background: e.info.color + "22", borderRadius: 10, padding: "2px 8px", flexShrink: 0 }}>{e.info.label}</span>
+                          <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", fontFamily: "ui-monospace, Menlo, monospace", flexShrink: 0, width: 44, textAlign: "right" }}>{e.info.unranked ? "—" : Math.round(e.score)}</span>
                         </div>
                       ))}
                     </div>
@@ -4336,47 +4430,31 @@ function AppContent({ user }) {
 
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {(() => {
-                    const shown = overall || { info: rankInfo(-1), progress: 0, exerciseCount: 0 };
-                    return (
-                      <div style={{ background: `linear-gradient(135deg, ${shown.info.color}22, #1F2836)`, border: `1px solid ${shown.info.color}66`, borderRadius: 10, padding: "12px 14px", marginBottom: 2 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                          <span style={{ fontSize: 20, fontWeight: 700, color: shown.info.color, fontFamily: "Georgia, serif" }}>{shown.info.label}</span>
-                          {shown.info.unranked ? <IconShield size={22} color={shown.info.color} /> : <RankShieldIcon tierIndex={shown.info.tierIdx} numeral={shown.info.sub} color={shown.info.color} size={26} />}
-                        </div>
-                        <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${shown.info.unranked ? 0 : shown.info.isMax ? 100 : shown.progress * 100}%`, background: shown.info.color, borderRadius: 4 }} />
-                        </div>
-                        <div style={{ fontSize: 9, color: "#5C6773", marginTop: 4 }}>
-                          {shown.info.unranked ? "Complete a workout to start earning ranks" : shown.info.isMax ? "Max rank reached" : `${Math.round(shown.progress * 100)}% to next rank`}
-                          {!shown.info.unranked && ` · from your top ${Math.min(8, shown.exerciseCount)} ranked exercise${Math.min(8, shown.exerciseCount) === 1 ? "" : "s"}`}
-                        </div>
-                        {!shown.info.unranked && rankBonusPct > 0 && (
-                          <div style={{ fontSize: 10, fontWeight: 700, color: shown.info.color, marginTop: 6 }}>+{Math.round(rankBonusPct * 100)}% XP · +{Math.round(rankBonusPct * 100)}% Gold on everything</div>
-                        )}
-                      </div>
-                    );
-                  })()}
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-                    <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 4px", flex: 1 }}>Ranks are calculated from your all-time best weight and reps per exercise. Tap one to see how you compare to friends.</p>
-                    <button onClick={() => setRankInfoModalOpen(true)} aria-label="How ranks work" title="How ranks work" className="qlog-btn" style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: "3px 9px", fontSize: 10, fontWeight: 700, color: accent, cursor: "pointer" }}>
+                    <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 4px", flex: 1 }}>Ranks are calculated from your all-time best weight and reps per exercise. Tap one to see how you compare to friends.</p>
+                    <button onClick={() => setRankInfoModalOpen(true)} aria-label="How ranks work" title="How ranks work" className="qlog-btn" style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 12, padding: "3px 9px", fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: accent, cursor: "pointer" }}>
                       <Info size={11} /> How ranks work
                     </button>
                   </div>
-                  {rows.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>Complete a workout to start earning ranks.</p>}
-                  {rows.map((r) => (
-                    <button key={r.id} onClick={() => setRankLeaderboardId(r.id)} className="qlog-btn" style={{ display: "flex", flexDirection: "column", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <span style={{ fontSize: 12.5, color: "#EDE4D3", fontWeight: 600 }}>{r.ex?.name || "?"}</span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: r.info.color, background: r.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>{r.info.label}</span>
-                      </div>
-                      <div style={{ height: 5, background: "#141C27", borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${r.info.isMax ? 100 : r.progress * 100}%`, background: r.info.color, borderRadius: 3 }} />
-                      </div>
-                      <span style={{ fontSize: 9, color: "#5C6773" }}>{r.info.isMax ? "Max rank reached" : `${Math.round(r.progress * 100)}% to ${RANK_TIER_NAMES[Math.floor(Math.min(r.idx + 1, TOTAL_RANKS - 1) / 3)]} ${RANK_SUBLABELS[Math.min(r.idx + 1, TOTAL_RANKS - 1) % 3]}`}</span>
-                    </button>
-                  ))}
+                  {rows.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>Complete a workout to start earning ranks.</p>}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 8 }}>
+                    {rows.map((r) => {
+                      const nextLabel = r.info.isMax ? null : `${RANK_TIER_NAMES[Math.floor(Math.min(r.idx + 1, TOTAL_RANKS - 1) / 3)]} ${RANK_SUBLABELS[Math.min(r.idx + 1, TOTAL_RANKS - 1) % 3]}`;
+                      const goal = r.info.isMax ? null : nextRankGoalText(r.profile, r.idx, r.bestSet, r.ex?.timed);
+                      return (
+                        <button key={r.id} onClick={() => setRankLeaderboardId(r.id)} className="qlog-btn" style={{ display: "flex", flexDirection: "column", gap: 6, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                            <span style={{ fontSize: "calc(12.5px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: 600, whiteSpace: "normal", lineHeight: 1.2 }}>{r.ex?.name || "?"}</span>
+                            <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: r.info.color, background: r.info.color + "22", borderRadius: 10, padding: "2px 8px", flexShrink: 0 }}>{r.info.label}</span>
+                          </div>
+                          <div style={{ height: 5, background: "#141C27", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${r.info.isMax ? 100 : r.progress * 100}%`, background: r.info.color, borderRadius: 3 }} />
+                          </div>
+                          <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773" }}>{r.info.isMax ? "Max rank reached" : goal ? `${goal} (${nextLabel})` : `${pctToNextRank(r.progress)}% of the way to ${nextLabel}`}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })()}
@@ -4388,8 +4466,8 @@ function AppContent({ user }) {
           <div style={{ marginBottom: 20 }}>
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: 10, marginBottom: 10 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, fontWeight: 700 }}>⚔ Gear</span>
-              <span style={{ fontSize: 9, color: "#5C6773", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
+              <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700 }}>⚔ Gear</span>
+              <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", fontWeight: 600 }}>{inventory.length}/{ITEM_CATALOGUE.length} collected</span>
             </div>
 
             {/* Active stats bar */}
@@ -4397,15 +4475,15 @@ function AppContent({ user }) {
               {activeStats.activeSets.length > 0 && activeStats.activeSets.map((s) => (
                 <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 3 }}>
                   <div style={{ width: 5, height: 5, borderRadius: "50%", background: s.color }} />
-                  <span style={{ fontSize: 9, fontWeight: 700, color: s.color }}>{s.label}</span>
+                  <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: s.color }}>{s.label}</span>
                 </div>
               ))}
-              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
-              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat}g</span>
-              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#4FA3C9" }}>🛡 {activeStats.defense + (playerStats.bonusDef || 0)}</span>
-              <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#8A2E44" }}>❤ {activeStats.maxHealth + (playerStats.bonusHp || 0)}</span>
-              {(activeStats.critChance + (playerStats.bonusCrit || 0)) > 0 && <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: "#C1652B" }}>💥 {Math.round((activeStats.critChance + (playerStats.bonusCrit || 0)) * 100)}% crit</span>}
-              {(playerStats.bonusAtk || 0) > 0 && <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>+{playerStats.bonusAtk} ATK</span>}
+              <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>⚔ +{Math.round(activeStats.xpPct * 100)}% XP</span>
+              <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: "#C9A227" }}>💰 +{activeStats.goldFlat}g</span>
+              <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: "#4FA3C9" }}>🛡 {activeStats.defense + (playerStats.bonusDef || 0)}</span>
+              <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: "#8A2E44" }}>❤ {activeStats.maxHealth + (playerStats.bonusHp || 0)}</span>
+              {(activeStats.critChance + (playerStats.bonusCrit || 0)) > 0 && <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: "#C1652B" }}>💥 {Math.round((activeStats.critChance + (playerStats.bonusCrit || 0)) * 100)}% crit</span>}
+              {(playerStats.bonusAtk || 0) > 0 && <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: accent }}>+{playerStats.bonusAtk} ATK</span>}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 6 }}>
@@ -4415,11 +4493,11 @@ function AppContent({ user }) {
                 return (
                   <button key={slot} onClick={() => { setPickingSlot(slot); setCollectionOpen(true); }} className="qlog-btn"
                     style={{ background: equippedItem ? rar.glow : "#1F2836", border: `1.5px solid ${equippedItem ? rar.color : "#2C3947"}`, borderRadius: 8, padding: "8px 4px", textAlign: "center", cursor: "pointer" }}>
-                    <div style={{ fontSize: 8, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>{SLOT_LABELS[slot]}</div>
+                    <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>{SLOT_LABELS[slot]}</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 20, marginBottom: 3 }}>
                       {equippedItem ? equippedItem.icon(rar.color) : <Plus size={13} color="#33414F" />}
                     </div>
-                    <div style={{ fontSize: 8, fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{equippedItem ? equippedItem.label : "Empty"}</div>
+                    <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", fontWeight: 700, color: equippedItem ? rar.color : "#4A5563", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{equippedItem ? equippedItem.label : "Empty"}</div>
                   </button>
                 );
               })}
@@ -4428,18 +4506,18 @@ function AppContent({ user }) {
 
           {/* Collection by rarity */}
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Collection by Rarity</div>
+            <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Collection by Rarity</div>
             {RARITY_ORDER.map((r) => {
               const total = ITEM_CATALOGUE.filter((i) => i.rarity === r).length;
               const owned = ITEM_CATALOGUE.filter((i) => i.rarity === r && inventory.includes(i.id)).length;
               const rar = RARITIES[r];
               return (
                 <div key={r} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontSize: 10, color: rar.color, width: 66, flexShrink: 0, fontWeight: 700 }}>{rar.label}</span>
+                  <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: rar.color, width: 66, flexShrink: 0, fontWeight: 700 }}>{rar.label}</span>
                   <div style={{ flex: 1, height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
                     <div style={{ height: "100%", width: `${total ? (owned / total) * 100 : 0}%`, background: rar.color, borderRadius: 4 }} />
                   </div>
-                  <span style={{ fontSize: 10, color: "#8A8578", fontFamily: "ui-monospace, Menlo, monospace", width: 38, textAlign: "right", flexShrink: 0 }}>{owned}/{total}</span>
+                  <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578", fontFamily: "ui-monospace, Menlo, monospace", width: 38, textAlign: "right", flexShrink: 0 }}>{owned}/{total}</span>
                 </div>
               );
             })}
@@ -4448,8 +4526,8 @@ function AppContent({ user }) {
           {/* Set bonuses */}
          <div className="qlog-card" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Set Bonuses</span>
-              <span style={{ fontSize: 9, color: "#5C6773" }}>{activeStats.activeSets.length} active</span>
+              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Set Bonuses</span>
+              <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773" }}>{activeStats.activeSets.length} active</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 6 }}>
               {SETS.map((set) => {
@@ -4460,9 +4538,9 @@ function AppContent({ user }) {
                 .sort((a, b) => (b.isActive - a.isActive) || (b.equippedCount / b.set.requiredCount - a.equippedCount / a.set.requiredCount))
                 .map(({ set, equippedCount, isActive }) => (
                   <button key={set.id} onClick={() => setSetDetailId(set.id)} className="qlog-btn" style={{ display: "flex", flexDirection: "column", gap: 4, background: isActive ? set.color + "18" : "#1F2836", border: `1px solid ${isActive ? set.color : "#2C3947"}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer", textAlign: "left" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? set.color : "#8A8578" }}>{set.label}</div>
-                    <div style={{ fontSize: 9, color: "#5C6773" }}>{set.desc}</div>
-                    <span style={{ fontSize: 10, fontFamily: "ui-monospace, Menlo, monospace", color: isActive ? set.color : "#5C6773" }}>{equippedCount}/{set.requiredCount} equipped</span>
+                    <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: isActive ? set.color : "#8A8578" }}>{set.label}</div>
+                    <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773" }}>{set.desc}</div>
+                    <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontFamily: "ui-monospace, Menlo, monospace", color: isActive ? set.color : "#5C6773" }}>{equippedCount}/{set.requiredCount} equipped</span>
                   </button>
                 ))}
             </div>
@@ -4476,12 +4554,12 @@ function AppContent({ user }) {
             {!myUsername ? (
               <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "20px 14px", textAlign: "center" }}>
                 <IconUsers size={26} color="#5C6773" style={{ marginBottom: 8 }} />
-                <p style={{ fontSize: 13, color: "#8A8578", margin: "0 0 12px" }}>Set a username to add friends and let them find you.</p>
+                <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 12px" }}>Set a username to add friends and let them find you.</p>
                 <div style={{ display: "flex", gap: 6, maxWidth: 280, margin: "0 auto" }}>
-                  <input value={usernameInput} onChange={(e) => { setUsernameInput(e.target.value); setUsernameMsg(null); }} placeholder="Choose a username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
-                  <button onClick={handleSaveUsername} disabled={usernameBusy || !usernameInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}>Save</button>
+                  <input value={usernameInput} onChange={(e) => { setUsernameInput(e.target.value); setUsernameMsg(null); }} placeholder="Choose a username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
+                  <button onClick={handleSaveUsername} disabled={usernameBusy || !usernameInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>Save</button>
                 </div>
-                {usernameMsg && <p style={{ fontSize: 11, marginTop: 8, color: usernameMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{usernameMsg.text}</p>}
+                {usernameMsg && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", marginTop: 8, color: usernameMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{usernameMsg.text}</p>}
               </div>
             ) : selectedFriendUid ? (() => {
               const friend = friendsData[selectedFriendUid];
@@ -4491,17 +4569,17 @@ function AppContent({ user }) {
               const friendOverall = computeOverallRank(friendRankRows) || { info: rankInfo(-1) };
               return (
                 <div>
-                  <button onClick={() => setSelectedFriendUid(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: 12, marginBottom: 12, padding: 0 }}><ChevronLeft size={14} /> All friends</button>
+                  <button onClick={() => setSelectedFriendUid(null)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, background: "none", border: "none", color: accent, cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))", marginBottom: 12, padding: 0 }}><ChevronLeft size={14} /> All friends</button>
 
                   <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                      <span style={{ fontSize: 15, fontWeight: 700 }}>{friend.username}</span>
-                      <button onClick={() => handleRemoveFriend(selectedFriendUid)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "4px 10px", fontSize: 10, color: "#8A2E44", cursor: "pointer" }}>Remove Friend</button>
+                      <span style={{ fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700 }}>{friend.username}</span>
+                      <button onClick={() => handleRemoveFriend(selectedFriendUid)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "4px 10px", fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A2E44", cursor: "pointer" }}>Remove Friend</button>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
-                      <span style={{ fontWeight: 700, fontSize: 16, color: accent, fontFamily: "Georgia, serif" }}>Lv {friendLevel.level}</span>
+                      <span style={{ fontWeight: 700, fontSize: "calc(16px * var(--ui-scale, 1))", color: accent, fontFamily: "Georgia, serif" }}>Lv {friendLevel.level}</span>
                       <Flame size={13} color={friend.streak > 0 ? "#C1652B" : "#4A5563"} fill={friend.streak > 0 ? "#C1652B" : "none"} />
-                      <span style={{ fontSize: 12, color: friend.streak > 0 ? "#C1652B" : "#8A8578", fontFamily: "ui-monospace, Menlo, monospace" }}>{friend.streak || 0}d streak</span>
+                      <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: friend.streak > 0 ? "#C1652B" : "#8A8578", fontFamily: "ui-monospace, Menlo, monospace" }}>{friend.streak || 0}d streak</span>
                     </div>
                     <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
                       <div style={{ height: "100%", width: `${(friendLevel.into / friendLevel.need) * 100}%`, background: accent, borderRadius: 4 }} />
@@ -4511,15 +4589,15 @@ function AppContent({ user }) {
                   {/* Overall Rank + Equipped — paired side by side when there's room */}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 10 }}>
                   <div style={{ background: `linear-gradient(135deg, ${friendOverall.info.color}22, #1F2836)`, border: `1px solid ${friendOverall.info.color}66`, borderRadius: 10, padding: "12px 14px" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
+                    <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 17, fontWeight: 700, color: friendOverall.info.color, fontFamily: "Georgia, serif" }}>{friendOverall.info.label}</span>
+                      <span style={{ fontSize: "calc(17px * var(--ui-scale, 1))", fontWeight: 700, color: friendOverall.info.color, fontFamily: "Georgia, serif" }}>{friendOverall.info.label}</span>
                       {friendOverall.info.unranked ? <IconShield size={18} color={friendOverall.info.color} /> : <RankShieldIcon tierIndex={friendOverall.info.tierIdx} numeral={friendOverall.info.sub} color={friendOverall.info.color} size={20} />}
                     </div>
                   </div>
 
                   <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</div>
+                    <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Equipped</div>
                     <div style={{ display: "flex", gap: 8 }}>
                       {GEAR_SLOTS.map((slot) => {
                         const itemId = friend.equipped?.[slot];
@@ -4528,7 +4606,7 @@ function AppContent({ user }) {
                         return (
                           <div key={slot} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: item ? rar.glow : "#1F2836", border: `1px solid ${item ? rar.color : "#2C3947"}`, borderRadius: 8, padding: "7px 4px" }}>
                             <div style={{ height: 20, display: "flex", alignItems: "center", justifyContent: "center" }}>{item ? item.icon(rar.color) : <X size={12} color="#33414F" />}</div>
-                            <span style={{ fontSize: 8, fontWeight: 700, color: item ? rar.color : "#4A5563", textAlign: "center" }}>{item ? item.label : SLOT_LABELS[slot]}</span>
+                            <span style={{ fontSize: "calc(8px * var(--ui-scale, 1))", fontWeight: 700, color: item ? rar.color : "#4A5563", textAlign: "center" }}>{item ? item.label : SLOT_LABELS[slot]}</span>
                           </div>
                         );
                       })}
@@ -4537,30 +4615,30 @@ function AppContent({ user }) {
                   </div>
 
                   {friendRankRows.length === 0 && (
-                    <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 10px" }}>No ranked exercises yet — they haven't logged a synced workout.</p>
+                    <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 10px" }}>No ranked exercises yet — they haven't logged a synced workout.</p>
                   )}
 
                   {friendRankRows.length > 0 && (
                     <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Exercise Ranks</div>
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Exercise Ranks</div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {friendRankRows.map((r) => (
                           <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: 12, color: "#EDE4D3" }}>{r.ex?.name || "?"}</span>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: r.info.color, background: r.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>{r.info.label}</span>
+                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3" }}>{r.ex?.name || "?"}</span>
+                            <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: r.info.color, background: r.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>{r.info.label}</span>
                           </div>
                         ))}
                       </div>
-                      <div style={{ fontSize: 9, color: "#5C6773", marginTop: 8 }}>Based on their last 10 synced sessions.</div>
+                      <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773", marginTop: 8 }}>Based on their last 10 synced sessions.</div>
                     </div>
                   )}
 
                   <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Routines</div>
-                    {(friend.workoutPlans || []).length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No workout plans yet.</p>}
+                    <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Routines</div>
+                    {(friend.workoutPlans || []).length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>No workout plans yet.</p>}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {(friend.workoutPlans || []).map((plan) => (
-                        <div key={plan.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#EDE4D3" }}>
+                        <div key={plan.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3" }}>
                           <span>{plan.name}</span>
                           <span style={{ color: "#5C6773" }}>{plan.exercises.length} exercises · ~{estimateWorkoutMinutes(plan)} min</span>
                         </div>
@@ -4569,14 +4647,14 @@ function AppContent({ user }) {
                   </div>
 
                   <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent Workouts</div>
-                    {(friend.workoutHistory || []).length === 0 && <p style={{ fontSize: 12, color: "#5C6773", margin: 0 }}>No workouts logged yet.</p>}
+                    <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Recent Workouts</div>
+                    {(friend.workoutHistory || []).length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>No workouts logged yet.</p>}
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {(friend.workoutHistory || []).map((h) => (
                         <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "7px 10px" }}>
-                          <span style={{ fontSize: 12, color: "#EDE4D3" }}>{h.planName}</span>
-                          <span style={{ fontSize: 10, color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
-                          <span style={{ fontSize: 10, color: accent }}>{h.totalVolume} vol</span>
+                          <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3" }}>{h.planName}</span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#8A8578" }}>{parseLocalDate(h.date).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>
+                          <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: accent }}>{h.totalVolume} vol</span>
                         </div>
                       ))}
                     </div>
@@ -4592,13 +4670,13 @@ function AppContent({ user }) {
                     { key: "challenges", label: "Challenges" },
                     { key: "add", label: "Add" },
                   ].map((t) => (
-                    <button key={t.key} onClick={() => setActiveFriendsTab(t.key)} className="qlog-btn" style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 20, border: `1px solid ${activeFriendsTab === t.key ? accent : "#33414F"}`, background: activeFriendsTab === t.key ? accent : "#232E3D", color: activeFriendsTab === t.key ? "#1B2430" : "#8A8578", cursor: "pointer", position: "relative" }}>
+                    <button key={t.key} onClick={() => setActiveFriendsTab(t.key)} className="qlog-btn" style={{ flex: "0 0 auto", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, padding: "6px 12px", borderRadius: 20, border: `1px solid ${activeFriendsTab === t.key ? accent : "#33414F"}`, background: activeFriendsTab === t.key ? accent : "#232E3D", color: activeFriendsTab === t.key ? "#1B2430" : "#8A8578", cursor: "pointer", position: "relative" }}>
                       {t.label}
                       {t.key === "requests" && friendRequests.incoming.length > 0 && (
-                        <span style={{ position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#8A2E44", color: "#EDE4D3", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>{friendRequests.incoming.length}</span>
+                        <span style={{ position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#8A2E44", color: "#EDE4D3", fontSize: "calc(9px * var(--ui-scale, 1))", display: "flex", alignItems: "center", justifyContent: "center" }}>{friendRequests.incoming.length}</span>
                       )}
                       {t.key === "challenges" && challenges.incoming.filter((c) => c.status === "pending").length > 0 && (
-                        <span style={{ position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#8A2E44", color: "#EDE4D3", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center" }}>{challenges.incoming.filter((c) => c.status === "pending").length}</span>
+                        <span style={{ position: "absolute", top: -4, right: -4, width: 16, height: 16, borderRadius: "50%", background: "#8A2E44", color: "#EDE4D3", fontSize: "calc(9px * var(--ui-scale, 1))", display: "flex", alignItems: "center", justifyContent: "center" }}>{challenges.incoming.filter((c) => c.status === "pending").length}</span>
                       )}
                     </button>
                   ))}
@@ -4606,8 +4684,8 @@ function AppContent({ user }) {
 
                 {activeFriendsTab === "friends" && (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 190px))", gap: 8 }}>
-                    {friendsLoading && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center", gridColumn: "1 / -1" }}>Loading...</p>}
-                    {!friendsLoading && friendIds.length === 0 && <p style={{ fontSize: 12, color: "#5C6773", textAlign: "center", gridColumn: "1 / -1" }}>No friends yet — add one in the Add tab.</p>}
+                    {friendsLoading && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", textAlign: "center", gridColumn: "1 / -1" }}>Loading...</p>}
+                    {!friendsLoading && friendIds.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773", textAlign: "center", gridColumn: "1 / -1" }}>No friends yet — add one in the Add tab.</p>}
                     {friendIds.map((uid) => {
                       const friend = friendsData[uid];
                       if (!friend) return null;
@@ -4616,15 +4694,15 @@ function AppContent({ user }) {
                       return (
                         <button key={uid} onClick={() => setSelectedFriendUid(uid)} className="qlog-btn qlog-card" style={{ display: "flex", flexDirection: "column", gap: 7, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "10px 12px", cursor: "pointer", textAlign: "left" }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-                            <span style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{friend.username}</span>
-                            <span style={{ fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace", flexShrink: 0 }}>Lv {friendLevel.level}</span>
+                            <span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{friend.username}</span>
+                            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: accent, fontFamily: "ui-monospace, Menlo, monospace", flexShrink: 0 }}>Lv {friendLevel.level}</span>
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: friendOverall.info.color, background: friendOverall.info.color + "22", borderRadius: 10, padding: "2px 7px" }}>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: friendOverall.info.color, background: friendOverall.info.color + "22", borderRadius: 10, padding: "2px 7px" }}>
                               {friendOverall.info.unranked ? <IconShield size={10} color={friendOverall.info.color} /> : <RankShieldIcon tierIndex={friendOverall.info.tierIdx} numeral={friendOverall.info.sub} color={friendOverall.info.color} size={12} />}
                               {friendOverall.info.label}
                             </span>
-                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: friend.streak > 0 ? "#C1652B" : "#5C6773" }}><Flame size={11} color={friend.streak > 0 ? "#C1652B" : "#5C6773"} /> {friend.streak || 0}d</span>
+                            <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "calc(11px * var(--ui-scale, 1))", color: friend.streak > 0 ? "#C1652B" : "#5C6773" }}><Flame size={11} color={friend.streak > 0 ? "#C1652B" : "#5C6773"} /> {friend.streak || 0}d</span>
                           </div>
                           <div style={{ display: "flex", gap: 4 }}>
                             {GEAR_SLOTS.map((slot) => {
@@ -4646,28 +4724,28 @@ function AppContent({ user }) {
                 {activeFriendsTab === "requests" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Incoming</div>
-                      {friendRequests.incoming.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No incoming requests.</p>}
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Incoming</div>
+                      {friendRequests.incoming.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No incoming requests.</p>}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {friendRequests.incoming.map((r) => (
                           <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
-                            <span style={{ fontSize: 12, color: "#EDE4D3" }}>{r.fromUsername}</span>
+                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3" }}>{r.fromUsername}</span>
                             <div style={{ display: "flex", gap: 6 }}>
-                              <button onClick={() => handleAcceptRequest(r.id)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Accept</button>
-                              <button onClick={() => handleDeclineRequest(r.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Decline</button>
+                              <button onClick={() => handleAcceptRequest(r.id)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "5px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Accept</button>
+                              <button onClick={() => handleDeclineRequest(r.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Decline</button>
                             </div>
                           </div>
                         ))}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Outgoing</div>
-                      {friendRequests.outgoing.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No outgoing requests.</p>}
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Outgoing</div>
+                      {friendRequests.outgoing.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No outgoing requests.</p>}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {friendRequests.outgoing.map((r) => (
                           <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
-                            <span style={{ fontSize: 12, color: "#8A8578" }}>{r.toUsername} <span style={{ color: "#5C6773" }}>· pending</span></span>
-                            <button onClick={() => handleCancelRequest(r.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: "#8A8578", cursor: "pointer" }}>Cancel</button>
+                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578" }}>{r.toUsername} <span style={{ color: "#5C6773" }}>· pending</span></span>
+                            <button onClick={() => handleCancelRequest(r.id)} className="qlog-btn" style={{ background: "none", border: "1px solid #33414F", borderRadius: 6, padding: "5px 10px", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
                           </div>
                         ))}
                       </div>
@@ -4677,46 +4755,46 @@ function AppContent({ user }) {
 
                 {activeFriendsTab === "challenges" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                    <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>
+                    <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>
                       {challengedToday
                         ? "You've already sent a challenge today — come back tomorrow."
                         : "Start a workout and tap \"Challenge?\" next to an exercise to send one — one per day."}
                     </p>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Incoming</div>
-                      {challenges.incoming.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No challenges yet — accepted ones show up as a bonus exercise in your next workout.</p>}
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Incoming</div>
+                      {challenges.incoming.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No challenges yet — accepted ones show up as a bonus exercise in your next workout.</p>}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {challenges.incoming.map((c) => (
                           <div key={c.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
-                            <span style={{ fontSize: 12, color: "#EDE4D3", fontWeight: 600 }}>{c.fromUsername} · {c.exerciseName}</span>
-                            <span style={{ fontSize: 11, color: "#8A8578" }}>Beat: {c.challengerWeight}kg × {c.challengerReps}</span>
-                            {c.status === "pending" && !c.delivered && <span style={{ fontSize: 11, color: "#5C6773" }}>Will show up in your next workout</span>}
-                            {c.status === "pending" && c.delivered && <span style={{ fontSize: 11, color: "#5C6773" }}>Waiting for you to attempt it</span>}
+                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: 600 }}>{c.fromUsername} · {c.exerciseName}</span>
+                            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Beat: {c.challengerWeight}kg × {c.challengerReps}</span>
+                            {c.status === "pending" && !c.delivered && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Will show up in your next workout</span>}
+                            {c.status === "pending" && c.delivered && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Waiting for you to attempt it</span>}
                             {c.status === "completed" && (
-                              <span style={{ fontSize: 11, fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
+                              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
                                 {c.winnerUid === user.uid ? "You won" : c.winnerUid ? "You lost" : "Tied"} — your attempt: {c.opponentWeight}kg × {c.opponentReps}
                               </span>
                             )}
-                            {c.status === "declined" && <span style={{ fontSize: 11, color: "#5C6773" }}>Ignored — declined</span>}
+                            {c.status === "declined" && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Ignored — declined</span>}
                           </div>
                         ))}
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sent</div>
-                      {challenges.outgoing.length === 0 && <p style={{ fontSize: 12, color: "#5C6773" }}>No challenges sent yet.</p>}
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Sent</div>
+                      {challenges.outgoing.length === 0 && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>No challenges sent yet.</p>}
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {challenges.outgoing.map((c) => (
                           <div key={c.id} style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
-                            <span style={{ fontSize: 12, color: "#EDE4D3", fontWeight: 600 }}>{c.toUsername} · {c.exerciseName}</span>
-                            <span style={{ fontSize: 11, color: "#8A8578" }}>Your throw: {c.challengerWeight}kg × {c.challengerReps}</span>
-                            {c.status === "pending" && <span style={{ fontSize: 11, color: "#5C6773" }}>Waiting for them to attempt...</span>}
+                            <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", fontWeight: 600 }}>{c.toUsername} · {c.exerciseName}</span>
+                            <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Your throw: {c.challengerWeight}kg × {c.challengerReps}</span>
+                            {c.status === "pending" && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Waiting for them to attempt...</span>}
                             {c.status === "completed" && (
-                              <span style={{ fontSize: 11, fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
+                              <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: c.winnerUid === user.uid ? "#4C9A6A" : c.winnerUid ? "#8A2E44" : "#8A8578" }}>
                                 {c.winnerUid === user.uid ? "You won" : c.winnerUid ? "They won" : "Tied"} — their attempt: {c.opponentWeight}kg × {c.opponentReps}
                               </span>
                             )}
-                            {c.status === "declined" && <span style={{ fontSize: 11, color: "#5C6773" }}>Ignored — declined</span>}
+                            {c.status === "declined" && <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773" }}>Ignored — declined</span>}
                           </div>
                         ))}
                       </div>
@@ -4726,12 +4804,12 @@ function AppContent({ user }) {
 
                 {activeFriendsTab === "add" && (
                   <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
-                    <p style={{ fontSize: 11, color: "#8A8578", margin: "0 0 10px" }}>Enter a friend's username to send them a request.</p>
+                    <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 10px" }}>Enter a friend's username to send them a request.</p>
                     <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-                      <input value={friendSearchInput} onChange={(e) => { setFriendSearchInput(e.target.value); setFriendSearchMsg(null); }} onKeyDown={(e) => e.key === "Enter" && handleSendFriendRequest()} placeholder="username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
-                      <button onClick={handleSendFriendRequest} disabled={friendSearchBusy || !friendSearchInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: "pointer" }}>Send</button>
+                      <input value={friendSearchInput} onChange={(e) => { setFriendSearchInput(e.target.value); setFriendSearchMsg(null); }} onKeyDown={(e) => e.key === "Enter" && handleSendFriendRequest()} placeholder="username" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
+                      <button onClick={handleSendFriendRequest} disabled={friendSearchBusy || !friendSearchInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer" }}>Send</button>
                     </div>
-                    {friendSearchMsg && <p style={{ fontSize: 12, margin: 0, color: friendSearchMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{friendSearchMsg.text}</p>}
+                    {friendSearchMsg && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", margin: 0, color: friendSearchMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{friendSearchMsg.text}</p>}
                   </div>
                 )}
               </>
@@ -4744,18 +4822,18 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => { setExercisePickerFor(null); setCustomExerciseForm(null); }}>
             <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 420, maxHeight: "85vh", overflowY: "auto", position: "relative" }}>
               <button onClick={() => { setExercisePickerFor(null); setCustomExerciseForm(null); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 10px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>Add Exercise</h3>
-              <input value={exercisePickerFilter.q} onChange={(e) => setExercisePickerFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search exercises..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+              <h3 style={{ margin: "0 0 10px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>Add Exercise</h3>
+              <input value={exercisePickerFilter.q} onChange={(e) => setExercisePickerFilter((f) => ({ ...f, q: e.target.value }))} placeholder="Search exercises..." style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-                <button onClick={() => setExercisePickerFilter((f) => ({ ...f, muscle: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exercisePickerFilter.muscle ? accent : "#33414F"}`, background: !exercisePickerFilter.muscle ? accent : "transparent", color: !exercisePickerFilter.muscle ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All muscles</button>
+                <button onClick={() => setExercisePickerFilter((f) => ({ ...f, muscle: null }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exercisePickerFilter.muscle ? accent : "#33414F"}`, background: !exercisePickerFilter.muscle ? accent : "transparent", color: !exercisePickerFilter.muscle ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All muscles</button>
                 {MUSCLE_GROUPS.map((m) => (
-                  <button key={m} onClick={() => setExercisePickerFilter((f) => ({ ...f, muscle: f.muscle === m ? null : m }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exercisePickerFilter.muscle === m ? accent : "#33414F"}`, background: exercisePickerFilter.muscle === m ? accent : "transparent", color: exercisePickerFilter.muscle === m ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{MUSCLE_LABELS[m]}</button>
+                  <button key={m} onClick={() => setExercisePickerFilter((f) => ({ ...f, muscle: f.muscle === m ? null : m }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${exercisePickerFilter.muscle === m ? accent : "#33414F"}`, background: exercisePickerFilter.muscle === m ? accent : "transparent", color: exercisePickerFilter.muscle === m ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{MUSCLE_LABELS[m]}</button>
                 ))}
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-                <button onClick={() => setExercisePickerFilter((f) => ({ ...f, equipment: null }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exercisePickerFilter.equipment ? accent : "#33414F"}`, background: !exercisePickerFilter.equipment ? accent : "transparent", color: !exercisePickerFilter.equipment ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All equipment</button>
+                <button onClick={() => setExercisePickerFilter((f) => ({ ...f, equipment: null }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${!exercisePickerFilter.equipment ? accent : "#33414F"}`, background: !exercisePickerFilter.equipment ? accent : "transparent", color: !exercisePickerFilter.equipment ? "#1B2430" : "#8A8578", cursor: "pointer" }}>All equipment</button>
                 {EQUIPMENT_TYPES.map((eq) => (
-                  <button key={eq} onClick={() => setExercisePickerFilter((f) => ({ ...f, equipment: f.equipment === eq ? null : eq }))} className="qlog-btn" style={{ fontSize: 10, padding: "3px 8px", borderRadius: 12, border: `1px solid ${exercisePickerFilter.equipment === eq ? accent : "#33414F"}`, background: exercisePickerFilter.equipment === eq ? accent : "transparent", color: exercisePickerFilter.equipment === eq ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{EQUIPMENT_LABELS[eq]}</button>
+                  <button key={eq} onClick={() => setExercisePickerFilter((f) => ({ ...f, equipment: f.equipment === eq ? null : eq }))} className="qlog-btn" style={{ fontSize: "calc(10px * var(--ui-scale, 1))", padding: "3px 8px", borderRadius: 12, border: `1px solid ${exercisePickerFilter.equipment === eq ? accent : "#33414F"}`, background: exercisePickerFilter.equipment === eq ? accent : "transparent", color: exercisePickerFilter.equipment === eq ? "#1B2430" : "#8A8578", cursor: "pointer" }}>{EQUIPMENT_LABELS[eq]}</button>
                 ))}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto", marginBottom: 10 }}>
@@ -4764,8 +4842,8 @@ function AppContent({ user }) {
                   .map((ex) => (
                     <div key={ex.id} style={{ display: "flex", alignItems: "center", gap: 4, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: "8px 10px" }}>
                       <button onClick={() => addExerciseToPlan(exercisePickerFor, ex.id)} className="qlog-btn" style={{ flex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
-                        <span style={{ fontSize: 12, color: "#EDE4D3" }}>{ex.name}</span>
-                        <span style={{ fontSize: 9, color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
+                        <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3" }}>{ex.name}</span>
+                        <span style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: "#5C6773" }}>{EQUIPMENT_LABELS[ex.equipment]}</span>
                       </button>
                       <InfoButton accent={accent} onClick={(e) => { e.stopPropagation(); openExerciseGuide(ex); }} />
                     </div>
@@ -4773,21 +4851,21 @@ function AppContent({ user }) {
               </div>
               {customExerciseForm ? (
                <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                  <input value={customExerciseForm.name} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, name: e.target.value }))} placeholder="Exercise name" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }} />
+                  <input value={customExerciseForm.name} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, name: e.target.value }))} placeholder="Exercise name" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }} />
                   <div style={{ display: "flex", gap: 6 }}>
-                    <select value={customExerciseForm.primaryMuscle || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, primaryMuscle: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
+                    <select value={customExerciseForm.primaryMuscle || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, primaryMuscle: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                       <option value="">Muscle...</option>
                       {MUSCLE_GROUPS.map((m) => <option key={m} value={m}>{MUSCLE_LABELS[m]}</option>)}
                     </select>
-                    <select value={customExerciseForm.equipment || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, equipment: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: 12 }}>
+                    <select value={customExerciseForm.equipment || ""} onChange={(e) => setCustomExerciseForm((f) => ({ ...f, equipment: e.target.value }))} style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, padding: "6px 8px", color: "#EDE4D3", fontSize: "calc(12px * var(--ui-scale, 1))" }}>
                       <option value="">Equipment...</option>
                       {EQUIPMENT_TYPES.map((eq) => <option key={eq} value={eq}>{EQUIPMENT_LABELS[eq]}</option>)}
                     </select>
                   </div>
-                  <button onClick={() => { const id = addCustomExercise(customExerciseForm); if (id) addExerciseToPlan(exercisePickerFor, id); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "7px 0", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Add & Use</button>
+                  <button onClick={() => { const id = addCustomExercise(customExerciseForm); if (id) addExerciseToPlan(exercisePickerFor, id); }} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "7px 0", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Add & Use</button>
                 </div>
               ) : (
-                <button onClick={() => setCustomExerciseForm({ name: "", primaryMuscle: "", equipment: "" })} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px dashed #33414F", borderRadius: 8, padding: "8px 0", fontSize: 12, color: "#8A8578", cursor: "pointer" }}>+ Add custom exercise</button>
+                <button onClick={() => setCustomExerciseForm({ name: "", primaryMuscle: "", equipment: "" })} className="qlog-btn" style={{ width: "100%", background: "none", border: "1px dashed #33414F", borderRadius: 8, padding: "8px 0", fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", cursor: "pointer" }}>+ Add custom exercise</button>
               )}
             </div>
           </div>
@@ -4801,28 +4879,28 @@ function AppContent({ user }) {
             <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setGuideModalExerciseId(null)}>
               <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 400, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
                 <button onClick={() => setGuideModalExerciseId(null)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif" }}>{ex?.name || "Exercise"}</h3>
-                <p style={{ margin: "0 0 14px", fontSize: 11, color: "#8A8578" }}>{MUSCLE_LABELS[ex?.primaryMuscle] || ""} · {EQUIPMENT_LABELS[ex?.equipment] || ""}</p>
-                {loading && <p style={{ fontSize: 12, color: "#8A8578", display: "flex", alignItems: "center", gap: 6 }}><Loader2 size={14} className="spin" /> Loading instructions...</p>}
+                <h3 style={{ margin: "0 0 4px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>{ex?.name || "Exercise"}</h3>
+                <p style={{ margin: "0 0 14px", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>{MUSCLE_LABELS[ex?.primaryMuscle] || ""} · {EQUIPMENT_LABELS[ex?.equipment] || ""}</p>
+                {loading && <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", display: "flex", alignItems: "center", gap: 6 }}><Loader2 size={14} className="spin" /> Loading instructions...</p>}
                 {!loading && guideError && !guide && (
                   <div>
-                    <p style={{ fontSize: 12, color: "#C1652B", marginBottom: 8 }}>{guideError}</p>
-                    <button onClick={() => openExerciseGuide(ex)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "7px 14px", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Retry</button>
+                    <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#C1652B", marginBottom: 8 }}>{guideError}</p>
+                    <button onClick={() => openExerciseGuide(ex)} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 6, padding: "7px 14px", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>Retry</button>
                   </div>
                 )}
                 {!loading && guide && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     <div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>How to perform</div>
+                      <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: "#8A8578", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>How to perform</div>
                       <ol style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 6 }}>
-                        {guide.steps.map((s, i) => <li key={i} style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.4 }}>{s}</li>)}
+                        {guide.steps.map((s, i) => <li key={i} style={{ fontSize: "calc(12.5px * var(--ui-scale, 1))", color: "#EDE4D3", lineHeight: 1.4 }}>{s}</li>)}
                       </ol>
                     </div>
                     {guide.tips.length > 0 && (
                      <div className="qlog-card" style={{ background: "#1F2836", border: "1px solid #2C3947", borderRadius: 8, padding: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Form tips</div>
+                        <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>Form tips</div>
                         <ul style={{ margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
-                          {guide.tips.map((t, i) => <li key={i} style={{ fontSize: 12, color: "#8A8578", lineHeight: 1.4 }}>{t}</li>)}
+                          {guide.tips.map((t, i) => <li key={i} style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", lineHeight: 1.4 }}>{t}</li>)}
                         </ul>
                       </div>
                     )}
@@ -4837,17 +4915,17 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setRankInfoModalOpen(false)}>
             <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
               <button onClick={() => setRankInfoModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Trophy size={16} color={accent} /> How ranks work</h3>
+              <h3 style={{ margin: "0 0 8px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Trophy size={16} color={accent} /> How ranks work</h3>
               <ul style={{ margin: "0 0 12px", paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
-                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>10 tiers, Bronze → Legend, each split into III/II/I — I is best, 30 ranks per exercise.</li>
-                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Ranked from your best-ever set (est. 1-rep max for weights, reps for bodyweight). Harder/rarer exercises need more to rank up, and each rank costs more than the last.</li>
-                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Overall Rank = your best 8 exercise ranks averaged, plus a small variety bonus.</li>
-                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Your Overall tier gives a permanent +1%/tier XP & gold bonus (up to +10%), plus a one-time reward the first time you reach each tier's I.</li>
-                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Tap an exercise to compare with friends (based on their last 10 synced sessions).</li>
+                <li style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", lineHeight: 1.4 }}>10 tiers, Bronze → Legend, each split into III/II/I — I is best, 30 ranks per exercise.</li>
+                <li style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", lineHeight: 1.4 }}>Ranked from your best-ever set (est. 1-rep max for weights, reps for bodyweight). Harder/rarer exercises need more to rank up, and each rank costs more than the last.</li>
+                <li style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", lineHeight: 1.4 }}>Overall Rank = your best 8 exercise ranks averaged, plus a small variety bonus.</li>
+                <li style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", lineHeight: 1.4 }}>Your Overall tier gives a permanent +1%/tier XP & gold bonus (up to +10%), plus a one-time reward the first time you reach each tier's I.</li>
+                <li style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", lineHeight: 1.4 }}>Tap an exercise to compare with friends (based on their last 10 synced sessions).</li>
               </ul>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Tiers</div>
-                <p style={{ fontSize: 10.5, color: "#5C6773", margin: "0 0 6px" }}>Same shield shape every rank — more ornamented per tier, numeral changes III/II/I.</p>
+                <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Tiers</div>
+                <p style={{ fontSize: "calc(10.5px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 6px" }}>Same shield shape every rank — more ornamented per tier, numeral changes III/II/I.</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                   {Array.from({ length: RANK_TIER_NAMES.length }, (_, i) => RANK_TIER_NAMES.length - 1 - i).map((tierIdx) => {
                     const idx = tierIdx * 3 + 2; // that tier's "I" rank
@@ -4856,8 +4934,8 @@ function AppContent({ user }) {
                       <div key={tierIdx} style={{ display: "flex", alignItems: "center", gap: 6, background: info.color + "18", border: `1px solid ${info.color}44`, borderRadius: 6, padding: "4px 6px" }}>
                         <RankShieldIcon tierIndex={info.tierIdx} numeral={info.sub} color={info.color} size={18} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 10.5, color: info.color, fontWeight: 600, whiteSpace: "nowrap" }}>{info.tier}</div>
-                          <div style={{ fontSize: 8.5, color: info.color, opacity: 0.75, whiteSpace: "nowrap" }}>+{tierIdx + 1}% XP/Gold</div>
+                          <div style={{ fontSize: "calc(10.5px * var(--ui-scale, 1))", color: info.color, fontWeight: 600, whiteSpace: "nowrap" }}>{info.tier}</div>
+                          <div style={{ fontSize: "calc(8.5px * var(--ui-scale, 1))", color: info.color, opacity: 0.75, whiteSpace: "nowrap" }}>+{tierIdx + 1}% XP/Gold</div>
                         </div>
                       </div>
                     );
@@ -4873,57 +4951,57 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 380, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
               <button onClick={() => { setAddModalOpen(false); setAssessError(false); setRecurringChoice(null); setManualMinutes(""); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>New Quest</h3>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && (aiQuotaExhausted || assessError ? addQuestManual() : addQuest())} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 14, opacity: assessing ? 0.6 : 1 }} />
+              <h3 style={{ margin: "0 0 14px", fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>New Quest</h3>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === "Enter" && !assessing && (aiQuotaExhausted || assessError ? addQuestManual() : addQuest())} placeholder="What needs doing?" disabled={assessing} autoFocus style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: "calc(14px * var(--ui-scale, 1))", opacity: assessing ? 0.6 : 1 }} />
 
               {/* Quota / error state — show manual difficulty picker */}
               {aiQuotaExhausted && (
                 <div style={{ background: "rgba(193,101,43,0.1)", border: "1px solid #C1652B", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
-                  <p style={{ fontSize: 12, color: "#C1652B", fontWeight: 600, margin: "0 0 4px" }}>⚠ AI quota reached for today</p>
-                  <p style={{ fontSize: 11, color: "#8A8578", margin: 0 }}>Resets tomorrow. Pick difficulty manually below.</p>
+                  <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#C1652B", fontWeight: 600, margin: "0 0 4px" }}>⚠ AI quota reached for today</p>
+                  <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", margin: 0 }}>Resets tomorrow. Pick difficulty manually below.</p>
                 </div>
               )}
               {assessError && !aiQuotaExhausted && (
-                <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 10px" }}>Assessment failed — pick difficulty manually below or try again.</p>
+                <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#C1652B", margin: "0 0 10px" }}>Assessment failed — pick difficulty manually below or try again.</p>
               )}
               {(aiQuotaExhausted || assessError) && (
                 <div style={{ marginBottom: 12 }}>
-                  <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Difficulty:</p>
+                  <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 6px" }}>Difficulty:</p>
                   <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
                     {themedDifficulties.map((d) => (
-                      <button key={d.key} onClick={() => setDifficulty(d.key)} className="qlog-btn" style={{ cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "5px 9px", borderRadius: 20, border: `1.5px solid ${d.color}`, background: difficulty === d.key ? d.color : "transparent", color: difficulty === d.key ? "#1B2430" : d.color }}>{d.label} · {d.xp}xp</button>
+                      <button key={d.key} onClick={() => setDifficulty(d.key)} className="qlog-btn" style={{ cursor: "pointer", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 600, padding: "5px 9px", borderRadius: 20, border: `1.5px solid ${d.color}`, background: difficulty === d.key ? d.color : "transparent", color: difficulty === d.key ? "#1B2430" : d.color }}>{d.label} · {d.xp}xp</button>
                     ))}
                   </div>
                 </div>
               )}
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Start date:</p>
-              <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Start date:</p>
+              <input type="date" value={addDate} onChange={(e) => setAddDate(e.target.value)} style={{ width: "100%", marginBottom: 12, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
 
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Repeat:</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 6px" }}>Repeat:</p>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: recurringChoice ? 10 : 16 }}>
                 {[{ key: null, label: "None" }, { key: "daily", label: "Daily" }, { key: "weekly", label: "Weekly" }].map((r) => (
-                  <button key={r.label} onClick={() => setRecurringChoice(r.key)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1.5px solid #33414F", background: recurringChoice === r.key ? accent : "transparent", color: recurringChoice === r.key ? "#1B2430" : "#8A8578" }}>
+                  <button key={r.label} onClick={() => setRecurringChoice(r.key)} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1.5px solid #33414F", background: recurringChoice === r.key ? accent : "transparent", color: recurringChoice === r.key ? "#1B2430" : "#8A8578" }}>
                     {r.key && <Repeat size={11} />} {r.label}
                   </button>
                 ))}
               </div>
               {recurringChoice && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, background: "#1F2836", borderRadius: 8, padding: "8px 12px" }}>
-                  <span style={{ fontSize: 12, color: "#8A8578" }}>For</span>
+                  <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578" }}>For</span>
                   <input type="number" min={1} max={52} value={repeatWeeks} onChange={(e) => setRepeatWeeks(Math.max(1, Math.min(52, Number(e.target.value) || 1)))}
-                    style={{ width: 52, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, textAlign: "center" }} />
-                  <span style={{ fontSize: 12, color: "#8A8578" }}>
+                    style={{ width: 52, background: "#141C27", border: "1px solid #33414F", borderRadius: 6, color: "#EDE4D3", padding: "4px 6px", fontFamily: "ui-monospace, Menlo, monospace", fontSize: "calc(13px * var(--ui-scale, 1))", textAlign: "center" }} />
+                  <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578" }}>
                     {recurringChoice === "daily" ? `weeks (${Math.max(1, repeatWeeks) * 7} quests)` : `weeks (${Math.max(1, repeatWeeks)} quests)`}
                   </span>
                 </div>
               )}
 
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Focus timer (minutes, optional):</p>
-              <input type="number" min={1} max={240} value={manualMinutes} onChange={(e) => setManualMinutes(e.target.value)} placeholder="AI will estimate if blank" style={{ width: "100%", marginBottom: 16, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Focus timer (minutes, optional):</p>
+              <input type="number" min={1} max={240} value={manualMinutes} onChange={(e) => setManualMinutes(e.target.value)} placeholder="AI will estimate if blank" style={{ width: "100%", marginBottom: 16, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
               <button onClick={aiQuotaExhausted || assessError ? addQuestManual : addQuest} className="qlog-btn" disabled={assessing || !title.trim()} style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: assessing || !title.trim() ? "default" : "pointer", opacity: assessing || !title.trim() ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}>
                 {assessing ? <Loader2 size={18} className="spin" /> : <Plus size={18} />} {assessing ? "Assessing..." : aiQuotaExhausted || assessError ? "Add Quest" : "Add Quest (AI)"}
               </button>
-              {!aiQuotaExhausted && !assessError && <p style={{ fontSize: 10, color: "#5C6773", margin: "8px 0 0", textAlign: "center" }}>Quest Log will assess difficulty + time automatically</p>}
+              {!aiQuotaExhausted && !assessError && <p style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", margin: "8px 0 0", textAlign: "center" }}>Quest Log will assess difficulty + time automatically</p>}
             </div>
           </div>
         )}
@@ -4932,11 +5010,11 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 400, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
               <button onClick={() => setDumpModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><FileText size={15} color={accent} /><span style={{ fontSize: 11, color: "#8A8578", fontWeight: 600 }}>BRAIN DUMP</span></div>
-              <h3 style={{ margin: "4px 0 6px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Paste everything at once</h3>
-              <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 12px" }}>Quest Log will split into quests, assign dates across the coming weeks, and pick difficulty + time for each.</p>
-              <textarea value={dumpText} onChange={(e) => setDumpText(e.target.value)} disabled={dumpParsing} placeholder="e.g. call dentist, finish slides for monday, laundry, dentist appointment next Thursday..." rows={5} style={{ width: "100%", resize: "vertical", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: 13, marginBottom: 12, opacity: dumpParsing ? 0.6 : 1 }} />
-              {dumpError && <p style={{ fontSize: 11, color: "#C1652B", margin: "0 0 12px" }}>That didn't go through — try again, or add quests one at a time.</p>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><FileText size={15} color={accent} /><span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", fontWeight: 600 }}>BRAIN DUMP</span></div>
+              <h3 style={{ margin: "4px 0 6px", fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>Paste everything at once</h3>
+              <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 12px" }}>Quest Log will split into quests, assign dates across the coming weeks, and pick difficulty + time for each.</p>
+              <textarea value={dumpText} onChange={(e) => setDumpText(e.target.value)} disabled={dumpParsing} placeholder="e.g. call dentist, finish slides for monday, laundry, dentist appointment next Thursday..." rows={5} style={{ width: "100%", resize: "vertical", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 12px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))", marginBottom: 12, opacity: dumpParsing ? 0.6 : 1 }} />
+              {dumpError && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#C1652B", margin: "0 0 12px" }}>That didn't go through — try again, or add quests one at a time.</p>}
               <button onClick={submitDump} className="qlog-btn" disabled={dumpParsing || !dumpText.trim()} style={{ width: "100%", background: accent, border: "none", borderRadius: 8, padding: "12px 0", fontWeight: 700, cursor: dumpParsing || !dumpText.trim() ? "default" : "pointer", opacity: dumpParsing || !dumpText.trim() ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, color: "#1B2430" }}>
                 {dumpParsing ? <Loader2 size={18} className="spin" /> : <Sparkles size={18} />} {dumpParsing ? "Planning..." : "Turn into quests"}
               </button>
@@ -4948,87 +5026,87 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 22, width: "100%", maxWidth: 400, position: "relative", maxHeight: "90vh", overflowY: "auto" }}>
               <button onClick={() => { setSettingsOpen(false); setConfirmClear(false); }} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>Settings</h3>
+              <h3 style={{ margin: "0 0 16px", fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>Settings</h3>
 
               <SettingsSection title="ACCOUNT" defaultOpen={true}>
-                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 3px" }}>Email</p>
-                <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 14px" }}>{user?.email}</p>
+                <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 3px" }}>Email</p>
+                <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", margin: "0 0 14px" }}>{user?.email}</p>
 
-                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Username</p>
+                <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Username</p>
                 <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                  <input value={usernameInput} onChange={(e) => { setUsernameInput(e.target.value); setUsernameMsg(null); }} placeholder="Add a display name" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
-                  <button onClick={handleSaveUsername} disabled={usernameBusy || !usernameInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: 12, color: "#1B2430", cursor: usernameBusy ? "default" : "pointer", opacity: usernameBusy || !usernameInput.trim() ? 0.6 : 1 }}>Save</button>
+                  <input value={usernameInput} onChange={(e) => { setUsernameInput(e.target.value); setUsernameMsg(null); }} placeholder="Add a display name" style={{ flex: 1, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
+                  <button onClick={handleSaveUsername} disabled={usernameBusy || !usernameInput.trim()} className="qlog-btn" style={{ background: accent, border: "none", borderRadius: 8, padding: "0 14px", fontWeight: 700, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#1B2430", cursor: usernameBusy ? "default" : "pointer", opacity: usernameBusy || !usernameInput.trim() ? 0.6 : 1 }}>Save</button>
                 </div>
-                {usernameMsg && <p style={{ fontSize: 11, margin: "0 0 14px", color: usernameMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{usernameMsg.text}</p>}
+                {usernameMsg && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", margin: "0 0 14px", color: usernameMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{usernameMsg.text}</p>}
                 {!usernameMsg && <div style={{ marginBottom: 14 }} />}
 
-                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 5px" }}>Change password</p>
-                <input type="password" autoComplete="current-password" value={currentPasswordInput} onChange={(e) => { setCurrentPasswordInput(e.target.value); setPasswordMsg(null); }} placeholder="Current password" style={{ width: "100%", marginBottom: 6, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
-                <input type="password" autoComplete="new-password" value={newPasswordInput} onChange={(e) => { setNewPasswordInput(e.target.value); setPasswordMsg(null); }} placeholder="New password (min 6 characters)" style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: 13 }} />
-                {passwordMsg && <p style={{ fontSize: 11, margin: "0 0 8px", color: passwordMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{passwordMsg.text}</p>}
-                <button onClick={handleChangePassword} disabled={passwordBusy} className="qlog-btn" style={{ width: "100%", background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: 12, color: "#EDE4D3", cursor: passwordBusy ? "default" : "pointer", opacity: passwordBusy ? 0.6 : 1, marginBottom: 16 }}>
+                <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 5px" }}>Change password</p>
+                <input type="password" autoComplete="current-password" value={currentPasswordInput} onChange={(e) => { setCurrentPasswordInput(e.target.value); setPasswordMsg(null); }} placeholder="Current password" style={{ width: "100%", marginBottom: 6, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
+                <input type="password" autoComplete="new-password" value={newPasswordInput} onChange={(e) => { setNewPasswordInput(e.target.value); setPasswordMsg(null); }} placeholder="New password (min 6 characters)" style={{ width: "100%", marginBottom: 8, background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "8px 10px", color: "#EDE4D3", fontSize: "calc(13px * var(--ui-scale, 1))" }} />
+                {passwordMsg && <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", margin: "0 0 8px", color: passwordMsg.type === "error" ? "#C1652B" : "#4C9A6A" }}>{passwordMsg.text}</p>}
+                <button onClick={handleChangePassword} disabled={passwordBusy} className="qlog-btn" style={{ width: "100%", background: "#1F2836", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontWeight: 600, fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3", cursor: passwordBusy ? "default" : "pointer", opacity: passwordBusy ? 0.6 : 1, marginBottom: 16 }}>
                   {passwordBusy ? "Updating..." : "Update Password"}
                 </button>
 
-                <button onClick={logOut} className="qlog-btn" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontSize: 12, fontWeight: 600, color: "#8A8578", cursor: "pointer" }}>Log Out</button>
+                <button onClick={logOut} className="qlog-btn" style={{ width: "100%", background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "9px 0", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, color: "#8A8578", cursor: "pointer" }}>Log Out</button>
               </SettingsSection>
 
               <SettingsSection title="PREFERENCES">
-                <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 6px" }}>Default calendar view</p>
+                <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 6px" }}>Default calendar view</p>
                 <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
                   {["day", "week", "month"].map((v) => (
                     <button key={v} onClick={() => setCalView(v)} className="qlog-btn"
-                      style={{ flex: 1, fontSize: 12, fontWeight: 700, padding: "8px 0", borderRadius: 8, border: "1px solid #33414F", background: calView === v ? accent : "#1F2836", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>
+                      style={{ flex: 1, fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, padding: "8px 0", borderRadius: 8, border: "1px solid #33414F", background: calView === v ? accent : "#1F2836", color: calView === v ? "#1B2430" : "#8A8578", cursor: "pointer", textTransform: "capitalize" }}>
                       {v}
                     </button>
                   ))}
                 </div>
                 <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#1F2836", borderRadius: 10, padding: "10px 14px", cursor: "pointer" }}>
-                  <span style={{ fontSize: 12, color: "#EDE4D3" }}>Auto-start rest timer after logging a set</span>
+                  <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#EDE4D3" }}>Auto-start rest timer after logging a set</span>
                   <input type="checkbox" checked={autoRestTimer} onChange={(e) => setAutoRestTimer(e.target.checked)} />
                 </label>
               </SettingsSection>
 
               <SettingsSection title="HOW XP MULTIPLIERS WORK">
                 <div style={{ background: "#1F2836", borderRadius: 10, padding: "12px 14px" }}>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>🔥 Streak bonus (stacks daily)</p>
+                  <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>🔥 Streak bonus (stacks daily)</p>
                   {[["3+ days", "+10%"], ["7+ days", "+20%"], ["14+ days", "+35%"], ["30+ days", "+50%"]].map(([d, b]) => (
-                    <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
+                    <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 3 }}>
                       <span>{d}</span><span style={{ color: "#C1652B", fontWeight: 700 }}>{b}</span>
                     </div>
                   ))}
                   <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>⚡ Combo bonus (same day)</p>
+                  <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 600, color: "#EDE4D3", margin: "0 0 8px" }}>⚡ Combo bonus (same day)</p>
                   {[["1st–2nd quest", "+0%"], ["3rd–4th quest", "+15%"], ["5th+ quest", "+30%"]].map(([d, b]) => (
-                    <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8578", marginBottom: 3 }}>
+                    <div key={d} style={{ display: "flex", justifyContent: "space-between", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", marginBottom: 3 }}>
                       <span>{d}</span><span style={{ color: accent, fontWeight: 700 }}>{b}</span>
                     </div>
                   ))}
                   <div style={{ height: 1, background: "#2C3947", margin: "10px 0" }} />
-                  <p style={{ fontSize: 11, color: "#5C6773", margin: 0 }}>Bonuses add together, then apply to the base XP. Beat the focus timer clock for an extra +25% on top.</p>
+                  <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>Bonuses add together, then apply to the base XP. Beat the focus timer clock for an extra +25% on top.</p>
                 </div>
               </SettingsSection>
 
               {"Notification" in window && (
                 <SettingsSection title="REMINDERS">
-                  <p style={{ fontSize: 12, color: "#8A8578", margin: "0 0 6px" }}>
+                  <p style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578", margin: "0 0 6px" }}>
                     {notifPermission === "granted" ? "Reminders are enabled." : "Get nudged so nothing slips."}
                   </p>
                   <ul style={{ margin: "0 0 10px", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 3 }}>
-                    <li style={{ fontSize: 11, color: "#8A8578" }}>Habits due soon or still open at day's end</li>
-                    <li style={{ fontSize: 11, color: "#8A8578" }}>Quests due today, still incomplete</li>
-                    <li style={{ fontSize: 11, color: "#8A8578" }}>Today's scheduled workout, not yet logged</li>
-                    <li style={{ fontSize: 11, color: "#8A8578" }}>Weekly boss battle ready (Mondays)</li>
-                    <li style={{ fontSize: 11, color: "#8A8578" }}>Friend requests, and when they're accepted</li>
-                    <li style={{ fontSize: 11, color: "#8A8578" }}>Rest timer and focus timer, while active</li>
+                    <li style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Habits due soon or still open at day's end</li>
+                    <li style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Quests due today, still incomplete</li>
+                    <li style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Today's scheduled workout, not yet logged</li>
+                    <li style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Weekly boss battle ready (Mondays)</li>
+                    <li style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Friend requests, and when they're accepted</li>
+                    <li style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578" }}>Rest timer and focus timer, while active</li>
                   </ul>
                   {notifPermission === "denied" && (
-                    <p style={{ fontSize: 11, color: "#8A2E44", margin: "0 0 10px" }}>Notifications are blocked in your browser settings. Enable them there first, then come back here.</p>
+                    <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A2E44", margin: "0 0 10px" }}>Notifications are blocked in your browser settings. Enable them there first, then come back here.</p>
                   )}
                   {notifPermission !== "denied" && (
                     <button onClick={async () => {
                       await requestNotifPermission();
-                    }} className="qlog-btn" style={{ width: "100%", background: notifPermission === "granted" ? "#1B2430" : accent, border: `1px solid ${notifPermission === "granted" ? "#33414F" : accent}`, borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: 13, color: notifPermission === "granted" ? "#8A8578" : "#1B2430", cursor: "pointer" }}>
+                    }} className="qlog-btn" style={{ width: "100%", background: notifPermission === "granted" ? "#1B2430" : accent, border: `1px solid ${notifPermission === "granted" ? "#33414F" : accent}`, borderRadius: 8, padding: "10px 0", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: notifPermission === "granted" ? "#8A8578" : "#1B2430", cursor: "pointer" }}>
                       {notifPermission === "granted" ? "🔔 Re-register reminders" : "🔔 Enable reminders"}
                     </button>
                   )}
@@ -5038,12 +5116,12 @@ function AppContent({ user }) {
               <SettingsSection title="DANGER ZONE">
                 {!confirmClear ? (
                   <button onClick={() => setConfirmClear(true)} className="qlog-btn"
-                    style={{ width: "100%", background: "transparent", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: 13, color: "#8A2E44", cursor: "pointer" }}>
+                    style={{ width: "100%", background: "transparent", border: "1px solid #8A2E44", borderRadius: 8, padding: "10px 0", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#8A2E44", cursor: "pointer" }}>
                     Clear all data
                   </button>
                 ) : (
                   <div style={{ background: "rgba(138,46,68,0.1)", border: "1px solid #8A2E44", borderRadius: 10, padding: "14px" }}>
-                    <p style={{ fontSize: 13, color: "#EDE4D3", margin: "0 0 12px", fontWeight: 600 }}>This deletes all quests, XP, streaks, and habits permanently. Are you sure?</p>
+                    <p style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", margin: "0 0 12px", fontWeight: 600 }}>This deletes all quests, XP, streaks, and habits permanently. Are you sure?</p>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button onClick={clearAllData} className="qlog-btn" style={{ flex: 1, background: "#8A2E44", border: "none", borderRadius: 8, padding: "10px 0", fontWeight: 700, color: "#EDE4D3", cursor: "pointer" }}>Yes, clear everything</button>
                       <button onClick={() => setConfirmClear(false)} className="qlog-btn" style={{ background: "#141C27", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", color: "#8A8578", cursor: "pointer" }}>Cancel</button>
@@ -5062,34 +5140,34 @@ function AppContent({ user }) {
               {/* Sticky header */}
               <div style={{ position: "sticky", top: 0, background: "#1B2430", borderRadius: "16px 16px 0 0", borderBottom: "1px solid #33414F", padding: "16px 22px 12px", zIndex: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}><Coins size={15} color="#C9A227" /><span style={{ fontSize: 13, color: "#C9A227", fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{gold}g</span></div>
-                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, fontFamily: "Georgia, serif" }}>Crate Shop</h3>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}><Coins size={15} color="#C9A227" /><span style={{ fontSize: "calc(13px * var(--ui-scale, 1))", color: "#C9A227", fontWeight: 700, fontFamily: "ui-monospace, Menlo, monospace" }}>{gold}g</span></div>
+                  <h3 style={{ margin: 0, fontSize: "calc(17px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>Crate Shop</h3>
                 </div>
                 <button onClick={() => setCrateModalOpen(false)} aria-label="Close" style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "6px 10px", color: "#EDE4D3", cursor: "pointer" }}><X size={16} /></button>
               </div>
               {/* Scrollable body */}
               <div style={{ overflowY: "auto", padding: "16px 22px 22px" }}>
-              <p style={{ fontSize: 11, color: "#5C6773", margin: "0 0 18px" }}>Open crates to discover gear. Earn gold by completing quests.</p>
+              <p style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", margin: "0 0 18px" }}>Open crates to discover gear. Earn gold by completing quests.</p>
 
               {/* Last drop result */}
               {lastDrop && (
                 <div style={{ background: RARITIES[lastDrop.item.rarity].glow, border: `1px solid ${RARITIES[lastDrop.item.rarity].color}`, borderRadius: 12, padding: "14px 16px", marginBottom: 18, textAlign: "center" }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 44, marginBottom: 6 }}>{lastDrop.item.icon(RARITIES[lastDrop.item.rarity].color)}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: RARITIES[lastDrop.item.rarity].color }}>{lastDrop.item.label}</div>
-                  <div style={{ fontSize: 11, color: "#8A8578", margin: "3px 0" }}>{lastDrop.item.desc}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: RARITIES[lastDrop.item.rarity].color, textTransform: "uppercase", letterSpacing: 1 }}>
+                  <div style={{ fontSize: "calc(13px * var(--ui-scale, 1))", fontWeight: 700, color: RARITIES[lastDrop.item.rarity].color }}>{lastDrop.item.label}</div>
+                  <div style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", margin: "3px 0" }}>{lastDrop.item.desc}</div>
+                  <div style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: 700, color: RARITIES[lastDrop.item.rarity].color, textTransform: "uppercase", letterSpacing: 1 }}>
                     {RARITIES[lastDrop.item.rarity].label} · {lastDrop.isNew ? "✨ New item!" : "Duplicate"}
                   </div>
                   {!lastDrop.isNew && lastDrop.dupeGold > 0 && (
-                    <div style={{ marginTop: 8, fontSize: 20, fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace" }}>+{lastDrop.dupeGold}g</div>
+                    <div style={{ marginTop: 8, fontSize: "calc(20px * var(--ui-scale, 1))", fontWeight: 700, color: "#C9A227", fontFamily: "ui-monospace, Menlo, monospace" }}>+{lastDrop.dupeGold}g</div>
                   )}
                   {lastDrop.isNew && (
                     <button onClick={() => { equipItem(lastDrop.item.id); setLastDrop(null); setCrateModalOpen(false); }} className="qlog-btn"
-                      style={{ marginTop: 10, background: accent, border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>
+                      style={{ marginTop: 10, background: accent, border: "none", borderRadius: 8, padding: "7px 16px", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#1B2430", cursor: "pointer" }}>
                       Equip now
                     </button>
                   )}
-                  <button onClick={() => setLastDrop(null)} style={{ display: "block", margin: "8px auto 0", background: "none", border: "none", fontSize: 11, color: "#5C6773", cursor: "pointer" }}>Dismiss</button>
+                  <button onClick={() => setLastDrop(null)} style={{ display: "block", margin: "8px auto 0", background: "none", border: "none", fontSize: "calc(11px * var(--ui-scale, 1))", color: "#5C6773", cursor: "pointer" }}>Dismiss</button>
                 </div>
               )}
 
@@ -5100,17 +5178,17 @@ function AppContent({ user }) {
                   return (
                     <div key={tier.id} style={{ background: "#232E3D", border: `1px solid ${tier.color}33`, borderRadius: 12, padding: "14px 16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                        <span style={{ fontSize: 26 }}>{tier.icon}</span>
+                        <span style={{ fontSize: "calc(26px * var(--ui-scale, 1))" }}>{tier.icon}</span>
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: tier.color }}>{tier.label}</div>
+                          <div style={{ fontSize: "calc(14px * var(--ui-scale, 1))", fontWeight: 700, color: tier.color }}>{tier.label}</div>
                           <div style={{ display: "flex", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                             {Object.entries(tier.weights).map(([r, w]) => w > 0 && (
-                              <span key={r} style={{ fontSize: 9, fontWeight: 700, color: RARITIES[r].color, textTransform: "uppercase" }}>{RARITIES[r].label} {w}%</span>
+                              <span key={r} style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: RARITIES[r].color, textTransform: "uppercase" }}>{RARITIES[r].label} {w}%</span>
                             ))}
                           </div>
                         </div>
                         <button onClick={() => openCrate(tier)} disabled={!canAfford} className="qlog-btn"
-                          style={{ background: canAfford ? tier.color : "#2C3947", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: 12, fontWeight: 700, color: canAfford ? "#1B2430" : "#5C6773", cursor: canAfford ? "pointer" : "default" }}>
+                          style={{ background: canAfford ? tier.color : "#2C3947", border: "none", borderRadius: 8, padding: "8px 14px", fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: canAfford ? "#1B2430" : "#5C6773", cursor: canAfford ? "pointer" : "default" }}>
                           {tier.cost}g
                         </button>
                       </div>
@@ -5119,7 +5197,7 @@ function AppContent({ user }) {
                   );
                 })}
               </div>
-              <p style={{ fontSize: 10, color: "#5C6773", margin: "14px 0 0", textAlign: "center" }}>Void and Celestial crates have boosted Legendary rates.</p>
+              <p style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", margin: "14px 0 0", textAlign: "center" }}>Void and Celestial crates have boosted Legendary rates.</p>
               </div>{/* end scrollable body */}
             </div>
           </div>
@@ -5134,9 +5212,9 @@ function AppContent({ user }) {
             <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.75)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setSetDetailId(null)}>
               <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 380, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
                 <button onClick={() => setSetDetailId(null)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-                <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", color: set.color }}>{set.label}</h3>
-                <p style={{ margin: "0 0 4px", fontSize: 12, color: "#8A8578" }}>{set.desc} — needs {set.requiredCount} of {set.items.length} items equipped</p>
-                {isActive && <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, color: set.color }}>✓ Bonus active</p>}
+                <h3 style={{ margin: "0 0 4px", fontSize: "calc(15px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif", color: set.color }}>{set.label}</h3>
+                <p style={{ margin: "0 0 4px", fontSize: "calc(12px * var(--ui-scale, 1))", color: "#8A8578" }}>{set.desc} — needs {set.requiredCount} of {set.items.length} items equipped</p>
+                {isActive && <p style={{ margin: "0 0 10px", fontSize: "calc(11px * var(--ui-scale, 1))", fontWeight: 700, color: set.color }}>✓ Bonus active</p>}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
                   {set.items.map((id) => {
                     const item = ITEM_CATALOGUE.find((i) => i.id === id);
@@ -5152,11 +5230,11 @@ function AppContent({ user }) {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           {owned ? (
                             <>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3" }}>{item.label}</div>
-                              <div style={{ fontSize: 9, color: rar.color, fontWeight: 700, textTransform: "capitalize" }}>{item.rarity}{isEquipped ? " · equipped" : ""}</div>
+                              <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3" }}>{item.label}</div>
+                              <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", color: rar.color, fontWeight: 700, textTransform: "capitalize" }}>{item.rarity}{isEquipped ? " · equipped" : ""}</div>
                             </>
                           ) : (
-                            <div style={{ fontSize: 12, color: "#5C6773" }}>Unidentified {SLOT_LABELS[item.slot]}</div>
+                            <div style={{ fontSize: "calc(12px * var(--ui-scale, 1))", color: "#5C6773" }}>Unidentified {SLOT_LABELS[item.slot]}</div>
                           )}
                         </div>
                       </div>
@@ -5177,10 +5255,10 @@ function AppContent({ user }) {
               <div style={{ background: "#1B2430", borderRadius: "16px 16px 0 0", borderBottom: "1px solid #33414F", padding: "14px 18px 14px", flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <div>
-                    <h3 style={{ margin: "0 0 2px", fontSize: 16, fontWeight: 700, fontFamily: "Georgia, serif" }}>
+                    <h3 style={{ margin: "0 0 2px", fontSize: "calc(16px * var(--ui-scale, 1))", fontWeight: 700, fontFamily: "Georgia, serif" }}>
                       Choose {SLOT_LABELS[pickingSlot]}
                     </h3>
-                    <p style={{ fontSize: 10, color: "#5C6773", margin: 0 }}>Tap an item to equip it</p>
+                    <p style={{ fontSize: "calc(10px * var(--ui-scale, 1))", color: "#5C6773", margin: 0 }}>Tap an item to equip it</p>
                   </div>
                   <button onClick={() => { setCollectionOpen(false); setPickingSlot(null); }}
                     style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "5px 9px", color: "#EDE4D3", cursor: "pointer" }}>
@@ -5214,29 +5292,29 @@ function AppContent({ user }) {
                               {owned ? item.icon(rar.color) : <Lock size={16} color="#4A5563" />}
                             </div>
                             {/* Name */}
-                            <div style={{ fontSize: 9, fontWeight: 700, color: owned ? rar.color : "#4A5563", lineHeight: 1.2, marginBottom: 2 }}>{owned ? item.label : "???"}</div>
+                            <div style={{ fontSize: "calc(9px * var(--ui-scale, 1))", fontWeight: 700, color: owned ? rar.color : "#4A5563", lineHeight: 1.2, marginBottom: 2 }}>{owned ? item.label : "???"}</div>
                             {/* Rarity */}
-                            <div style={{ fontSize: 8, color: owned ? rar.color + "99" : "#3A4552", marginBottom: 3 }}>{rar.label}</div>
+                            <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", color: owned ? rar.color + "99" : "#3A4552", marginBottom: 3 }}>{rar.label}</div>
                             {/* Bonuses */}
                             {owned && hasBns && (
-                              <div style={{ fontSize: 8, color: "#4C9A6A", marginBottom: 2 }}>
+                              <div style={{ fontSize: "calc(8px * var(--ui-scale, 1))", color: "#4C9A6A", marginBottom: 2 }}>
                                 {item.bonuses.xpPct ? `+${Math.round(item.bonuses.xpPct*100)}%XP ` : ""}
                                 {item.bonuses.goldFlat ? `+${item.bonuses.goldFlat}g` : ""}
                               </div>
                             )}
-                            {item.futureStats?.defense > 0 && owned && <div style={{ fontSize: 7, color: "#5C6773", marginBottom: 2 }}>DEF {item.futureStats.defense}</div>}
-                            {item.futureStats?.critChance > 0 && owned && <div style={{ fontSize: 7, color: "#C1652B", marginBottom: 2 }}>💥 {Math.round(item.futureStats.critChance * 100)}% crit</div>}
+                            {item.futureStats?.defense > 0 && owned && <div style={{ fontSize: "calc(7px * var(--ui-scale, 1))", color: "#5C6773", marginBottom: 2 }}>DEF {item.futureStats.defense}</div>}
+                            {item.futureStats?.critChance > 0 && owned && <div style={{ fontSize: "calc(7px * var(--ui-scale, 1))", color: "#C1652B", marginBottom: 2 }}>💥 {Math.round(item.futureStats.critChance * 100)}% crit</div>}
                             {/* Set membership chips */}
                             {owned && itemSets.length > 0 && (
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 2, justifyContent: "center", marginTop: 2 }}>
                                 {itemSets.map(({ set, ownedCount }) => (
-                                  <span key={set.id} style={{ fontSize: 7, padding: "1px 4px", borderRadius: 10, background: set.color + "22", color: set.color, border: `1px solid ${set.color}44`, fontWeight: 700 }}>
+                                  <span key={set.id} style={{ fontSize: "calc(7px * var(--ui-scale, 1))", padding: "1px 4px", borderRadius: 10, background: set.color + "22", color: set.color, border: `1px solid ${set.color}44`, fontWeight: 700 }}>
                                     {set.label.replace(" Set","").replace(" Knight","").substring(0,8)} {ownedCount}/{set.items.length}
                                   </span>
                                 ))}
                               </div>
                             )}
-                            {!owned && <div style={{ fontSize: 7, color: "#4A5563", marginTop: 2 }}>Locked</div>}
+                            {!owned && <div style={{ fontSize: "calc(7px * var(--ui-scale, 1))", color: "#4A5563", marginTop: 2 }}>Locked</div>}
                           </div>
                         );
                       })}
@@ -5254,8 +5332,8 @@ function AppContent({ user }) {
       {(activeTab === "home" || activeTab === "quests") && (<>
         {fabMenuOpen && activeTab === "quests" && (
           <div style={{ position: "fixed", right: 16, bottom: "calc(148px + env(safe-area-inset-bottom, 0px))", zIndex: 61, display: "flex", flexDirection: "column", gap: 8 }}>
-            <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><Plus size={15} /> Add Quest</button>
-            <button onClick={() => { setDumpModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><FileText size={14} /> Brain Dump</button>
+            <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#1B2430", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><Plus size={15} /> Add Quest</button>
+            <button onClick={() => { setDumpModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: "calc(13px * var(--ui-scale, 1))", color: "#EDE4D3", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><FileText size={14} /> Brain Dump</button>
           </div>
         )}
         <button
@@ -5280,7 +5358,7 @@ function AppContent({ user }) {
         ].map(({ key, label, Icon }) => (
           <button key={key} onClick={() => { setActiveTab(key); setFabMenuOpen(false); }} className="qlog-btn" style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, background: "none", border: "none", padding: "9px 0 8px", cursor: "pointer", color: activeTab === key ? accent : "#8A8578" }}>
             <Icon size={19} color={activeTab === key ? accent : "#8A8578"} />
-            <span style={{ fontSize: 10, fontWeight: activeTab === key ? 700 : 500 }}>{label}</span>
+            <span style={{ fontSize: "calc(10px * var(--ui-scale, 1))", fontWeight: activeTab === key ? 700 : 500 }}>{label}</span>
           </button>
         ))}
       </div>
