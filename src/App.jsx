@@ -42,6 +42,7 @@ const PERFECT_DAY_XP = 10;
 const WORKOUT_SET_XP = 2;
 const WORKOUT_COMPLETE_XP = 20;
 const DEFAULT_WORKOUT_SCHEDULE = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
+const DAILY_CRATE_WEIGHTS = { common: 60, uncommon: 25, rare: 15, epic: 0, legendary: 0 };
 
 // ---- Exercise rank system ----
 // Each exercise gets an all-time best "score" (estimated 1-rep max for weighted lifts,
@@ -73,7 +74,7 @@ function rankInfo(idx) {
   const subIdx = clamped % 3;
   // Each of the 30 ranks gets its own shade — tier sets the hue, sub-level (III/II/I) lightens it.
   const color = shadeColor(RANK_TIER_COLORS[tierIdx], (subIdx - 1) * 0.13);
-  return { idx: clamped, label: `${RANK_TIER_NAMES[tierIdx]} ${RANK_SUBLABELS[subIdx]}`, tier: RANK_TIER_NAMES[tierIdx], sub: RANK_SUBLABELS[subIdx], color, isMax: clamped === TOTAL_RANKS - 1, unranked: false };
+  return { idx: clamped, label: `${RANK_TIER_NAMES[tierIdx]} ${RANK_SUBLABELS[subIdx]}`, tier: RANK_TIER_NAMES[tierIdx], tierIdx, sub: RANK_SUBLABELS[subIdx], color, isMax: clamped === TOTAL_RANKS - 1, unranked: false };
 }
 
 function getExerciseRankProfile(ex) {
@@ -642,6 +643,40 @@ function SettingsSection({ title, defaultOpen = false, children }) {
   );
 }
 
+// A rank's badge is always the same shield shape — only the Roman numeral inside
+// changes between a tier's III/II/I. The shield itself gets progressively more
+// ornamented (band, gem, flares, spikes, crown, glow) as the tier climbs from
+// Bronze (0) to Legend (9), so the visual "weight" of a badge tells you the tier
+// at a glance even before reading the numeral.
+function RankShieldIcon({ tierIndex = 0, numeral = "III", color = "#8B8D91", size = 20 }) {
+  const t = Math.max(0, Math.min(9, tierIndex));
+  const fontSize = numeral.length >= 3 ? 7.5 : numeral.length === 2 ? 8.5 : 9.5;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {t >= 9 && (
+        <path d="M12 2L4 5v5.5c0 5.2 3.4 9.9 8 11.3c4.6-1.4 8-6.1 8-11.3V5l-8-3z" fill="none" stroke={color} strokeWidth="0.6" opacity="0.35" transform="translate(-2.1,-2.1) scale(1.18)" />
+      )}
+      {t >= 8 && <path d="M7 1 L8.6 3.2 L12 0.4 L15.4 3.2 L17 1 L16.1 4.6 L7.9 4.6 Z" fill={color} opacity="0.85" />}
+      {t >= 6 && (<>
+        <line x1="6.6" y1="3.6" x2="5.4" y2="1.5" stroke={color} strokeWidth="0.9" strokeLinecap="round" opacity="0.75" />
+        <line x1="17.4" y1="3.6" x2="18.6" y2="1.5" stroke={color} strokeWidth="0.9" strokeLinecap="round" opacity="0.75" />
+      </>)}
+      <path d="M12 2L4 5v5.5c0 5.2 3.4 9.9 8 11.3c4.6-1.4 8-6.1 8-11.3V5l-8-3z" fill={color} opacity={0.16 + t * 0.02} stroke={color} strokeWidth={t >= 1 ? 1.4 : 1.15} />
+      {t >= 1 && (
+        <path d="M12 3.3L5.3 5.8v4.9c0 4.5 3 8.6 6.7 9.8c3.7-1.2 6.7-5.3 6.7-9.8V5.8L12 3.3z" fill="none" stroke={color} strokeWidth="0.55" opacity="0.5" />
+      )}
+      {t >= 2 && <circle cx="12" cy="5" r="0.85" fill={color} opacity="0.9" />}
+      {t >= 4 && (<>
+        <line x1="4" y1="6.2" x2="1.4" y2="5.3" stroke={color} strokeWidth="1" strokeLinecap="round" opacity="0.7" />
+        <line x1="20" y1="6.2" x2="22.6" y2="5.3" stroke={color} strokeWidth="1" strokeLinecap="round" opacity="0.7" />
+      </>)}
+      {t >= 3 && <circle cx="12" cy="12.6" r={t >= 5 ? 1.7 : 1.3} fill={color} opacity="0.28" />}
+      {t >= 5 && <circle cx="12" cy="12.6" r="2.4" fill="none" stroke={color} strokeWidth="0.4" opacity="0.4" />}
+      <text x="12" y="15.3" textAnchor="middle" fontSize={fontSize} fontWeight="800" fill={color} fontFamily="ui-monospace, Menlo, monospace">{numeral}</text>
+    </svg>
+  );
+}
+
 function InfoButton({ onClick, accent = "#C9A227", size = 13 }) {
   return (
     <button onClick={onClick} aria-label="How to perform" title="How to perform" className="qlog-btn"
@@ -702,10 +737,13 @@ function AppContent({ user }) {
   const devTapTimer = useRef(null); // { item, isNew }
   const [habits, setHabits] = useState([]);
   const [habitPerfectDayDate, setHabitPerfectDayDate] = useState(null);
+  const [dailyCrateClaimedDate, setDailyCrateClaimedDate] = useState(null);
   const [newHabitName, setNewHabitName] = useState("");
   const [newHabitDeadline, setNewHabitDeadline] = useState("");
   const [habitModalId, setHabitModalId] = useState(null); // null closed, "new" = add mode, else the habit id being edited
   const [habitBanner, setHabitBanner] = useState(null);
+  const [rankTierBanner, setRankTierBanner] = useState(null);
+  const [claimedRankTiers, setClaimedRankTiers] = useState([]); // tier indices (0=Bronze..9=Legend) whose "I" rank reward has been claimed
   const [perfectDayBanner, setPerfectDayBanner] = useState(false);
   const [habitXpPop, setHabitXpPop] = useState(null);
   const [loaded, setLoaded] = useState(false);
@@ -877,6 +915,8 @@ function AppContent({ user }) {
         setShifts(data.shifts || []);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
+        setDailyCrateClaimedDate(data.dailyCrateClaimedDate || null);
+        setClaimedRankTiers(data.claimedRankTiers || []);
         setWorkoutPlans(data.workoutPlans || []);
         setWorkoutSchedule(data.workoutSchedule || DEFAULT_WORKOUT_SCHEDULE);
         setWorkoutHistory(data.workoutHistory || []);
@@ -921,12 +961,12 @@ function AppContent({ user }) {
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
           quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts,
-          habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus,
+          habits, habitPerfectDayDate, dailyCrateClaimedDate, claimedRankTiers, calView, pendingBattle, battleState, focus,
           workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer, exerciseGuides,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
-  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, calView, pendingBattle, battleState, focus, loaded, workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer, exerciseGuides]);
+  }, [quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts, habits, habitPerfectDayDate, dailyCrateClaimedDate, claimedRankTiers, calView, pendingBattle, battleState, focus, loaded, workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer, exerciseGuides]);
 
   // ---- Real-time sync from other devices ----
   useEffect(() => {
@@ -962,6 +1002,8 @@ function AppContent({ user }) {
         setPendingBattle(data.pendingBattle || null);
         setHabits(data.habits || []);
         setHabitPerfectDayDate(data.habitPerfectDayDate || null);
+        setDailyCrateClaimedDate(data.dailyCrateClaimedDate || null);
+        setClaimedRankTiers(data.claimedRankTiers || []);
         setWorkoutPlans(data.workoutPlans || []);
         setWorkoutSchedule(data.workoutSchedule || DEFAULT_WORKOUT_SCHEDULE);
         setWorkoutSession(data.workoutSession || null);
@@ -1118,6 +1160,26 @@ function AppContent({ user }) {
     };
   }, [workoutSession?.restTimer?.running, workoutSession?.restTimer?.endsAt, swReg]);
 
+  // ---- Reward reaching a new tier's "I" rank (Bronze I, Iron I, ... Legend I) on Overall Rank ----
+  useEffect(() => {
+    if (!loaded) return;
+    const overall = computeOverallRank(computeExerciseRankRows(workoutHistory, customExercises));
+    if (!overall) return;
+    const newlyClaimed = [];
+    for (let t = 0; t < RANK_TIER_NAMES.length; t++) {
+      if (overall.idx >= t * 3 + 2 && !claimedRankTiers.includes(t)) newlyClaimed.push(t);
+    }
+    if (newlyClaimed.length === 0) return;
+    let xpGain = 0, goldGain = 0;
+    newlyClaimed.forEach((t) => { xpGain += (t + 1) * 15; goldGain += (t + 1) * 5; });
+    setTotalXP((x) => x + xpGain);
+    setGold((g) => g + goldGain);
+    setClaimedRankTiers((c) => [...c, ...newlyClaimed]);
+    const topTier = Math.max(...newlyClaimed);
+    setRankTierBanner({ tierName: RANK_TIER_NAMES[topTier], xp: xpGain, gold: goldGain, color: RANK_TIER_COLORS[topTier] });
+    setTimeout(() => setRankTierBanner(null), 3200);
+  }, [loaded, workoutHistory, customExercises]);
+
   // ---- Keep screen awake while the focus timer is enlarged on screen ----
   useEffect(() => {
     if (!focusOpen || !("wakeLock" in navigator)) return;
@@ -1178,6 +1240,11 @@ function AppContent({ user }) {
   }, [loaded, today]);
 
   const activeStats = computeActiveStats(equipped);
+  // Overall Rank grants a small, always-on XP/gold multiplier on top of gear — 1% per
+  // tier reached (Bronze=1% ... Legend=10%), separate from the one-time tier-I bonus.
+  const overallRankForBonus = computeOverallRank(computeExerciseRankRows(workoutHistory, customExercises));
+  const rankBonusPct = overallRankForBonus ? (overallRankForBonus.info.tierIdx + 1) * 0.01 : 0;
+  const effectiveXpPct = activeStats.xpPct + rankBonusPct;
   const activeAura = equipped.aura ? ITEM_CATALOGUE.find((i) => i.id === equipped.aura) : null;
   const auraColor = activeAura?.auraColor || null;
 
@@ -1403,9 +1470,9 @@ function AppContent({ user }) {
     const baseXP = quest.missedPenalty ? Math.round(quest.xp * (1 - MISSED_PENALTY_PCT)) : quest.xp;
     const workXP = baseXP + beatClockBonus + bossBonus;
     const boostXP = Math.round(workXP * boostPct);
-    const gearXP = Math.round((workXP + boostXP) * activeStats.xpPct);
+    const gearXP = Math.round((workXP + boostXP) * effectiveXpPct);
     const xpGain = workXP + boostXP + gearXP + milestoneBonus;
-    const goldEarned = Math.max(1, Math.round(xpGain / 10) + activeStats.goldFlat);
+    const goldEarned = Math.max(1, Math.round((xpGain / 10) * (1 + rankBonusPct)) + activeStats.goldFlat);
     const prevLevel = levelFromXP(totalXP).level;
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
@@ -1414,7 +1481,7 @@ function AppContent({ user }) {
     setTotalXP(newTotal);
     setGold((g) => g + goldEarned);
     if (streakChanged) { setStreak(newStreak); setLastActiveDate(today); }
-    setXpPop({ id, xp: workXP + boostXP, gearXP, gearPct: activeStats.xpPct, activeSets: activeStats.activeSets });
+    setXpPop({ id, xp: workXP + boostXP, gearXP, gearPct: effectiveXpPct, activeSets: activeStats.activeSets });
     setTimeout(() => setXpPop(null), 900);
     if (isBoss) { setBossBanner(true); setTimeout(() => setBossBanner(false), 2400); }
     if (milestoneBonus > 0) { setStreakBanner({ days: newStreak, bonus: milestoneBonus }); setTimeout(() => setStreakBanner(null), 2400); }
@@ -1494,9 +1561,9 @@ function AppContent({ user }) {
     let mainStreakChanged = false, newMainStreak = streak;
     if (lastActiveDate !== today) { newMainStreak = lastActiveDate === yesterday ? streak + 1 : 1; mainStreakChanged = true; }
     const baseXP = HABIT_XP + milestoneBonus + (perfectDayEarned ? PERFECT_DAY_XP : 0);
-    const gearXP = Math.round(baseXP * activeStats.xpPct);
+    const gearXP = Math.round(baseXP * effectiveXpPct);
     const xpGain = baseXP + gearXP;
-    const goldEarned = Math.max(1, Math.round(xpGain / 10) + activeStats.goldFlat);
+    const goldEarned = Math.max(1, Math.round((xpGain / 10) * (1 + rankBonusPct)) + activeStats.goldFlat);
     const prevLevel = levelFromXP(totalXP).level;
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
@@ -1625,7 +1692,7 @@ function AppContent({ user }) {
     setWorkoutSession((s) => s ? { ...s, restTimer: null } : s);
   }
   function logSet(exIdx, setIdx, weight, reps, restSeconds) {
-    const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * activeStats.xpPct);
+    const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * effectiveXpPct);
     setWorkoutSession((s) => {
       if (!s) return s;
       const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
@@ -1646,7 +1713,7 @@ function AppContent({ user }) {
     setTimeout(() => setWorkoutXpPop(null), 900);
   }
   function uncompleteSet(exIdx, setIdx) {
-    const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * activeStats.xpPct);
+    const setXpGain = WORKOUT_SET_XP + Math.round(WORKOUT_SET_XP * effectiveXpPct);
     setWorkoutSession((s) => {
       if (!s) return s;
       const exercises = s.exercises.map((e, i) => i !== exIdx ? e : {
@@ -1663,9 +1730,10 @@ function AppContent({ user }) {
     const durationSeconds = Math.max(1, Math.floor((Date.now() - workoutSession.startedAt) / 1000));
     const totalVolume = workoutSession.exercises.reduce((sum, e) => sum + e.sets.reduce((s2, st) => s2 + (st.completed ? (Number(st.weight) || 0) * (Number(st.reps) || 0) : 0), 0), 0);
     const prevLevel = levelFromXP(totalXP).level;
-    const gearXP = Math.round(WORKOUT_COMPLETE_XP * activeStats.xpPct);
+    const gearXP = Math.round(WORKOUT_COMPLETE_XP * effectiveXpPct);
     const xpGain = WORKOUT_COMPLETE_XP + gearXP;
-    const goldEarned = Math.max(1, Math.round(xpGain / 10) + activeStats.goldFlat);
+    const totalSessionXP = (workoutSession.setsXp || 0) + xpGain;
+    const goldEarned = Math.max(2, Math.round((totalSessionXP / 8) * (1 + rankBonusPct)) + activeStats.goldFlat);
     const newTotal = totalXP + xpGain;
     const newLevel = levelFromXP(newTotal).level;
     setTotalXP(newTotal);
@@ -1944,8 +2012,8 @@ function AppContent({ user }) {
       // Step 2: Enemy death check
       setTimeout(() => {
         if (enemyHp <= 0) {
-          const goldReward = enemy.reward + activeStats.goldFlat;
-          const xpReward = enemy.xpReward + Math.round(enemy.xpReward * activeStats.xpPct);
+          const goldReward = Math.round(enemy.reward * (1 + rankBonusPct)) + activeStats.goldFlat;
+          const xpReward = enemy.xpReward + Math.round(enemy.xpReward * effectiveXpPct);
           log.push(`💀 ${enemy.name} defeated! +${goldReward}g +${xpReward}XP`);
           setGold((g) => g + goldReward);
           setTotalXP((x) => x + xpReward);
@@ -2099,6 +2167,20 @@ function AppContent({ user }) {
     setGold((g) => g - tier.cost + dupeGold);
     if (isNew) setInventory((inv) => [...inv, item.id]);
     setLastDrop({ item, isNew, dupeGold });
+  }
+
+  function claimDailyCrate() {
+    if (dailyCrateClaimedDate === today) return;
+    const item = rollCrate({ weights: DAILY_CRATE_WEIGHTS }, inventory);
+    const isNew = !inventory.includes(item.id);
+    const dupeRanges = { common: [3,8], uncommon: [5,12], rare: [10,20], epic: [30,55], legendary: [75,125] };
+    const [dMin, dMax] = dupeRanges[item.rarity] || [3,8];
+    const dupeGold = isNew ? 0 : (dMin + Math.floor(Math.random() * (dMax - dMin + 1)));
+    setGold((g) => g + dupeGold);
+    if (isNew) setInventory((inv) => [...inv, item.id]);
+    setLastDrop({ item, isNew, dupeGold });
+    setDailyCrateClaimedDate(today);
+    setCrateModalOpen(true);
   }
 
   // ---- Quest card (compact for calendar cells) ----
@@ -2356,7 +2438,8 @@ function AppContent({ user }) {
   return (
     <div className="safe-top" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84, "--accent-card-hover": accent + "40" }}>
       <style>{`
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; scrollbar-width: none; -ms-overflow-style: none; }
+        *::-webkit-scrollbar { display: none; width: 0; height: 0; }
         .qlog-btn { transition: transform 0.12s ease, filter 0.15s ease; }
         .qlog-btn:active { transform: scale(0.96); }
         @media (hover: hover) {
@@ -2458,6 +2541,7 @@ function AppContent({ user }) {
       {bossBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #8A5FBF, #1B2430)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Crown size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>Boss defeated! Bonus XP earned.</span></div>}
       {perfectDayBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0), left: "50%", zIndex: 60, background: "linear-gradient(135deg, #C9A227, #4C9A6A)", padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Sparkles size={20} color="#1B2430" /><span style={{ fontWeight: 700, color: "#1B2430", fontSize: 14 }}>Perfect day! All habits done — +{PERFECT_DAY_XP} XP</span></div>}
       {habitBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${habitTier(habitBanner.days).color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Flame size={20} color="#EDE4D3" fill="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{habitBanner.name}: {habitBanner.days}-day streak! +{habitBanner.bonus} XP</span></div>}
+      {rankTierBanner && <div className="level-banner" style={{ position: "fixed", top: (levelUp ? 84 : 24) + (streakBanner ? 60 : 0) + (bossBanner ? 60 : 0) + (perfectDayBanner ? 60 : 0) + (habitBanner ? 60 : 0), left: "50%", zIndex: 60, background: `linear-gradient(135deg, ${rankTierBanner.color}, #1B2430)`, padding: "14px 28px", borderRadius: 10, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.25)" }}><Trophy size={20} color="#EDE4D3" /><span style={{ fontWeight: 700, color: "#EDE4D3", fontSize: 14 }}>{rankTierBanner.tierName} I reached! +{rankTierBanner.xp} XP +{rankTierBanner.gold}g</span></div>}
 
       {/* Confetti burst on level up */}
       {confettiPieces.map((p) => (
@@ -2830,7 +2914,7 @@ function AppContent({ user }) {
         {/* XP / Streak (Home tab) */}
         {activeTab === "home" && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
-          <div className="qlog-card" style={{ flex: "1 1 100%", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
+          <div className="qlog-card" style={{ flex: "1 1 240px", background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 4 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span onClick={() => {
@@ -2879,6 +2963,16 @@ function AppContent({ user }) {
             </div>
           </div>
 
+          {(() => {
+            const info = overallRankForBonus ? overallRankForBonus.info : rankInfo(-1);
+            return (
+              <button onClick={() => { setActiveTab("workout"); setActiveWorkoutTab("ranks"); }} className="qlog-btn qlog-card" style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, background: `linear-gradient(135deg, ${info.color}22, ${themePersonality.cardBase})`, border: `1px solid ${info.color}66`, borderRadius: 10, padding: "10px 16px", cursor: "pointer", minWidth: 92 }}>
+                {info.unranked ? <IconShield size={40} color={info.color} /> : <RankShieldIcon tierIndex={info.tierIdx} numeral={info.sub} color={info.color} size={46} />}
+                <span style={{ fontSize: 11, fontWeight: 700, color: info.color, whiteSpace: "nowrap" }}>{info.label}</span>
+              </button>
+            );
+          })()}
+
           {bossQuest && (
             <div style={{ flex: "1 1 100%", display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", background: "rgba(138,95,191,0.1)", borderRadius: 8, border: "1px solid #8A5FBF" }}>
               <Crown size={12} color="#8A5FBF" />
@@ -2893,6 +2987,18 @@ function AppContent({ user }) {
         {/* Home tab snapshot cards */}
         {activeTab === "home" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+            {/* Daily login crate */}
+            {dailyCrateClaimedDate !== today && (
+              <button onClick={claimDailyCrate} className="qlog-btn qlog-card" style={{ display: "flex", alignItems: "center", gap: 12, background: `linear-gradient(135deg, ${accent}22, ${themePersonality.cardBase})`, border: `1px solid ${accent}66`, borderRadius: 10, padding: "12px 14px", cursor: "pointer", textAlign: "left" }}>
+                <span style={{ fontSize: 26, lineHeight: 1 }}>🎁</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>Daily Crate Ready</div>
+                  <div style={{ fontSize: 11, color: "#8A8578" }}>Free crate for logging in today — tap to open</div>
+                </div>
+                <ChevronRight size={16} color={accent} />
+              </button>
+            )}
+
             {/* Today at a glance */}
             <div className="qlog-card" style={{ background: themePersonality.cardBase, border: `1px solid ${themePersonality.borderCol}`, borderRadius: 10, padding: "12px 14px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.4 }}>Today at a glance</div>
@@ -2949,7 +3055,7 @@ function AppContent({ user }) {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4 }}>Workout summary</span>
                     <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: overall.info.color, background: overall.info.color + "22", borderRadius: 10, padding: "2px 8px" }}>
-                      {overall.info.unranked ? <IconShield size={11} color={overall.info.color} /> : <Trophy size={11} color={overall.info.color} />}
+                      {overall.info.unranked ? <IconShield size={11} color={overall.info.color} /> : <RankShieldIcon tierIndex={overall.info.tierIdx} numeral={overall.info.sub} color={overall.info.color} size={13} />}
                       {overall.info.label}
                     </span>
                   </div>
@@ -3467,7 +3573,7 @@ function AppContent({ user }) {
               const top = [...rankRows].sort((a, b) => (b.idx + b.progress) - (a.idx + a.progress)).slice(0, 3);
               return (
                 <button onClick={() => setActiveWorkoutTab("ranks")} className="qlog-btn" style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "#1F2836", border: "1px solid #2C3947", borderRadius: 10, padding: "9px 12px", marginBottom: 10, cursor: "pointer", textAlign: "left" }}>
-                  {overall.info.unranked ? <IconShield size={18} color={overall.info.color} style={{ flexShrink: 0 }} /> : <Trophy size={18} color={overall.info.color} style={{ flexShrink: 0 }} />}
+                  {overall.info.unranked ? <IconShield size={18} color={overall.info.color} style={{ flexShrink: 0 }} /> : <RankShieldIcon tierIndex={overall.info.tierIdx} numeral={overall.info.sub} color={overall.info.color} size={20} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: overall.info.color }}>{overall.info.label}</span>
@@ -3951,7 +4057,7 @@ function AppContent({ user }) {
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                           <span style={{ fontSize: 20, fontWeight: 700, color: shown.info.color, fontFamily: "Georgia, serif" }}>{shown.info.label}</span>
-                          {shown.info.unranked ? <IconShield size={22} color={shown.info.color} /> : <Trophy size={22} color={shown.info.color} />}
+                          {shown.info.unranked ? <IconShield size={22} color={shown.info.color} /> : <RankShieldIcon tierIndex={shown.info.tierIdx} numeral={shown.info.sub} color={shown.info.color} size={26} />}
                         </div>
                         <div style={{ height: 6, background: "#141C27", borderRadius: 4, overflow: "hidden" }}>
                           <div style={{ height: "100%", width: `${shown.info.unranked ? 0 : shown.info.isMax ? 100 : shown.progress * 100}%`, background: shown.info.color, borderRadius: 4 }} />
@@ -3960,6 +4066,9 @@ function AppContent({ user }) {
                           {shown.info.unranked ? "Complete a workout to start earning ranks" : shown.info.isMax ? "Max rank reached" : `${Math.round(shown.progress * 100)}% to next rank`}
                           {!shown.info.unranked && ` · from your top ${Math.min(8, shown.exerciseCount)} ranked exercise${Math.min(8, shown.exerciseCount) === 1 ? "" : "s"}`}
                         </div>
+                        {!shown.info.unranked && rankBonusPct > 0 && (
+                          <div style={{ fontSize: 10, fontWeight: 700, color: shown.info.color, marginTop: 6 }}>+{Math.round(rankBonusPct * 100)}% XP · +{Math.round(rankBonusPct * 100)}% Gold on everything</div>
+                        )}
                       </div>
                     );
                   })()}
@@ -4119,7 +4228,7 @@ function AppContent({ user }) {
                     <div style={{ fontSize: 10, fontWeight: 700, color: "#8A8578", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Overall Rank</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <span style={{ fontSize: 17, fontWeight: 700, color: friendOverall.info.color, fontFamily: "Georgia, serif" }}>{friendOverall.info.label}</span>
-                      {friendOverall.info.unranked ? <IconShield size={18} color={friendOverall.info.color} /> : <Trophy size={18} color={friendOverall.info.color} />}
+                      {friendOverall.info.unranked ? <IconShield size={18} color={friendOverall.info.color} /> : <RankShieldIcon tierIndex={friendOverall.info.tierIdx} numeral={friendOverall.info.sub} color={friendOverall.info.color} size={20} />}
                     </div>
                   </div>
 
@@ -4222,7 +4331,7 @@ function AppContent({ user }) {
                           </div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                             <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 700, color: friendOverall.info.color, background: friendOverall.info.color + "22", borderRadius: 10, padding: "2px 7px" }}>
-                              {friendOverall.info.unranked ? <IconShield size={10} color={friendOverall.info.color} /> : <Trophy size={10} color={friendOverall.info.color} />}
+                              {friendOverall.info.unranked ? <IconShield size={10} color={friendOverall.info.color} /> : <RankShieldIcon tierIndex={friendOverall.info.tierIdx} numeral={friendOverall.info.sub} color={friendOverall.info.color} size={12} />}
                               {friendOverall.info.label}
                             </span>
                             <span style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 11, color: friend.streak > 0 ? "#C1652B" : "#5C6773" }}><Flame size={11} color={friend.streak > 0 ? "#C1652B" : "#5C6773"} /> {friend.streak || 0}d</span>
@@ -4389,45 +4498,31 @@ function AppContent({ user }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(10,14,20,0.7)", zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setRankInfoModalOpen(false)}>
             <div onClick={(e) => e.stopPropagation()} style={{ background: "#232E3D", border: "1px solid #33414F", borderRadius: 16, padding: 18, width: "100%", maxWidth: 420, maxHeight: "80vh", overflowY: "auto", position: "relative" }}>
               <button onClick={() => setRankInfoModalOpen(false)} aria-label="Close" style={{ position: "absolute", top: 14, right: 14, background: "none", border: "none", color: "#8A8578", cursor: "pointer" }}><X size={18} /></button>
-              <h3 style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Trophy size={16} color={accent} /> How ranks work</h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Tiers</div>
-                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>There are 10 tiers — Bronze, Iron, Silver, Gold, Platinum, Diamond, Master, Grandmaster, Champion, Legend — each split into III, II and I, where I is the best. That's 30 ranks per exercise.</p>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Your score</div>
-                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Each exercise is ranked from your all-time best logged set. For weighted lifts, that's an estimated 1-rep max from your weight and reps. For bodyweight moves, it's based on reps (with a bonus if you add weight).</p>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Why exercises differ</div>
-                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>The weight or reps needed to hit each rank depends on the exercise — big compound lifts (squats, deadlifts) need more weight than isolation moves (curls, extensions) to reach the same rank, and harder bodyweight moves (pull-ups, dips) need far fewer reps than easier ones (push-ups, bodyweight squats).</p>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Getting harder</div>
-                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Each rank needs more than the last, and it compounds — climbing from Bronze to Diamond takes steady progress, but Master through Legend is an elite ceiling that takes real dedication to reach.</p>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Overall Rank</div>
-                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Your Overall Rank averages your best 8 exercise ranks, plus a small bonus for having ranked in many different exercises. A few strong lifts is enough to place well — piling on easy exercises won't inflate it much on its own.</p>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Leaderboards</div>
-                  <p style={{ fontSize: 12.5, color: "#EDE4D3", lineHeight: 1.5, margin: 0 }}>Tapping an exercise shows how you compare to friends. Friend scores are based on their last 10 synced workout sessions, so their true best may be a little higher than shown.</p>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.4 }}>All ranks</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-                    {Array.from({ length: TOTAL_RANKS }, (_, i) => TOTAL_RANKS - 1 - i).map((idx) => {
-                      const info = rankInfo(idx);
-                      return (
-                        <div key={idx} style={{ display: "flex", alignItems: "center", gap: 5, background: info.color + "18", border: `1px solid ${info.color}44`, borderRadius: 6, padding: "4px 6px" }}>
-                          <span style={{ width: 7, height: 7, borderRadius: "50%", background: info.color, flexShrink: 0 }} />
-                          <span style={{ fontSize: 10.5, color: info.color, fontWeight: 600, whiteSpace: "nowrap" }}>{info.label}</span>
+              <h3 style={{ margin: "0 0 8px", fontSize: 15, fontWeight: 700, fontFamily: "Georgia, serif", display: "flex", alignItems: "center", gap: 8 }}><Trophy size={16} color={accent} /> How ranks work</h3>
+              <ul style={{ margin: "0 0 12px", paddingLeft: 16, display: "flex", flexDirection: "column", gap: 4 }}>
+                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>10 tiers, Bronze → Legend, each split into III/II/I — I is best, 30 ranks per exercise.</li>
+                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Ranked from your best-ever set (est. 1-rep max for weights, reps for bodyweight). Harder/rarer exercises need more to rank up, and each rank costs more than the last.</li>
+                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Overall Rank = your best 8 exercise ranks averaged, plus a small variety bonus.</li>
+                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Your Overall tier gives a permanent +1%/tier XP & gold bonus (up to +10%), plus a one-time reward the first time you reach each tier's I.</li>
+                <li style={{ fontSize: 12, color: "#EDE4D3", lineHeight: 1.4 }}>Tap an exercise to compare with friends (based on their last 10 synced sessions).</li>
+              </ul>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: accent, marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.4 }}>Tiers</div>
+                <p style={{ fontSize: 10.5, color: "#5C6773", margin: "0 0 6px" }}>Same shield shape every rank — more ornamented per tier, numeral changes III/II/I.</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                  {Array.from({ length: RANK_TIER_NAMES.length }, (_, i) => RANK_TIER_NAMES.length - 1 - i).map((tierIdx) => {
+                    const idx = tierIdx * 3 + 2; // that tier's "I" rank
+                    const info = rankInfo(idx);
+                    return (
+                      <div key={tierIdx} style={{ display: "flex", alignItems: "center", gap: 6, background: info.color + "18", border: `1px solid ${info.color}44`, borderRadius: 6, padding: "4px 6px" }}>
+                        <RankShieldIcon tierIndex={info.tierIdx} numeral={info.sub} color={info.color} size={18} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 10.5, color: info.color, fontWeight: 600, whiteSpace: "nowrap" }}>{info.tier}</div>
+                          <div style={{ fontSize: 8.5, color: info.color, opacity: 0.75, whiteSpace: "nowrap" }}>+{tierIdx + 1}% XP/Gold</div>
                         </div>
-                      );
-                    })}
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
