@@ -2308,20 +2308,22 @@ function AppContent({ user }) {
           onDragEnd={() => { dragIdRef.current = null; setIsDragging(false); setDragOverDate(null); setDragOverTrash(false); }}
           style={{
             position: "absolute", inset: 0,
-            display: "flex", alignItems: "center", gap: 6, padding: "5px 6px", borderRadius: 4,
+            display: "flex", alignItems: "stretch", borderRadius: 4,
             background: q.completed ? themePersonality.deepBase : isMissed ? "rgba(138,46,68,0.15)" : themePersonality.cardBase,
-            borderLeft: `2px solid ${isMissed ? "#8A2E44" : diff.color}`,
             opacity: q.completed ? 0.5 : 1, cursor: "grab", userSelect: "none",
           }}>
-          {/* Quick-complete dot */}
-          <div
+          {/* Quick-complete rectangle — left ~18% of the row */}
+          <button
             onClick={(e) => { e.stopPropagation(); q.completed ? uncompleteQuest(q.id) : completeQuest(q.id); }}
-            style={{ width: 8, height: 8, borderRadius: "50%", background: q.completed ? "#4C9A6A" : diff.color, flexShrink: 0, cursor: "pointer", padding: 6, margin: "-6px -2px -6px -5px" }}
             title={q.completed ? "Undo" : "Complete"}
-          />
+            className="qlog-check-btn"
+            style={{ flex: "0 0 18%", minWidth: 16, border: "none", borderRadius: "4px 0 0 4px", background: q.completed ? "#4C9A6A" : isMissed ? "#8A2E44" : diff.color, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+          >
+            {q.completed ? <Check size={11} color="#141C27" /> : <Check size={11} color="#8A8578" className="qlog-check-hint" />}
+          </button>
           <span
             onClick={() => setQuestDetailFor(q.id)}
-            style={{ fontSize: 11, lineHeight: 1.2, color: isMissed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer" }}
+            style={{ fontSize: 11, lineHeight: 1.2, color: isMissed ? "#C1652B" : q.completed ? "#5C6773" : "#EDE4D3", textDecoration: q.completed ? "line-through" : "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, cursor: "pointer", display: "flex", alignItems: "center", padding: "0 6px" }}
             title={isMissed ? `Missed original due date — XP reduced ${Math.round(MISSED_PENALTY_PCT * 100)}%` : undefined}>
             {isMissed ? "❄ " : ""}{q.title}
           </span>
@@ -2560,6 +2562,10 @@ function AppContent({ user }) {
         .qlog-card { transition: box-shadow 0.15s ease; }
         @media (hover: hover) {
           .qlog-card:hover { box-shadow: 0 0 0 1px var(--accent-card-hover); }
+        }
+        .qlog-check-hint { opacity: 0.55; transition: opacity 0.15s ease; }
+        @media (hover: hover) {
+          .qlog-check-btn:hover .qlog-check-hint { opacity: 1; }
         }
         @keyframes floatUp { 0% { opacity:0; transform: translateY(6px) scale(0.9);} 20% { opacity:1; transform: translateY(-4px) scale(1.05);} 100% { opacity:0; transform: translateY(-32px) scale(1);} }
         @keyframes bannerIn { 0% { opacity:0; transform: translate(-50%,-20px) scale(0.9);} 15% { opacity:1; transform: translate(-50%,0) scale(1);} 85% { opacity:1; transform: translate(-50%,0) scale(1);} 100% { opacity:0; transform: translate(-50%,-10px) scale(0.95);} }
@@ -3573,12 +3579,17 @@ function AppContent({ user }) {
                 const isLate = !!h.deadlineTime && !doneToday && nowHHMM() > h.deadlineTime;
                 const dots = habitWeekDots(h, today);
                 return (
-                  <div key={h.id} onClick={() => openEditHabitModal(h)} className="qlog-btn qlog-card" style={{ position: "relative", display: "flex", flexDirection: "column", gap: 4, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: "4px 8px", cursor: "pointer", textAlign: "left" }}>
+                  <div key={h.id} onClick={() => openEditHabitModal(h)} className="qlog-btn qlog-card" style={{ position: "relative", display: "flex", alignItems: "stretch", minHeight: 58, background: "#1F2836", border: isLate ? "1px solid #8A2E44" : "1px solid #2C3947", borderRadius: 6, padding: 0, cursor: "pointer", textAlign: "left", overflow: "hidden" }}>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); doneToday ? uncompleteHabit(h.id) : completeHabit(h.id); }}
+                      title={doneToday ? "Undo" : "Complete"}
+                      className="qlog-check-btn"
+                      style={{ flex: "0 0 18%", minWidth: 32, border: "none", background: doneToday ? "#4C9A6A" : "transparent", borderRight: `2px solid ${doneToday ? "#4C9A6A" : "#5C6773"}`, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}
+                    >
+                      {doneToday ? <Check size={14} color="#141C27" /> : <Check size={14} color="#8A8578" className="qlog-check-hint" />}
+                    </button>
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, padding: "4px 8px", minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      {!doneToday
-                        ? <button onClick={(e) => { e.stopPropagation(); completeHabit(h.id); }} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", border: "2px solid #5C6773", background: "transparent", cursor: "pointer" }} />
-                        : <button onClick={(e) => { e.stopPropagation(); uncompleteHabit(h.id); }} className="qlog-btn" style={{ width: 15, height: 15, minWidth: 15, borderRadius: "50%", background: "#4C9A6A", border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><Check size={9} color="#141C27" /></button>
-                      }
                       <span style={{ flex: 1, fontSize: 12, textDecoration: doneToday ? "line-through" : "none", opacity: doneToday ? 0.6 : 1 }}>{h.name}</span>
                       {isLate && <span style={{ fontSize: 9, fontWeight: 700, color: "#D9536A" }}>LATE</span>}
                       {h.deadlineTime && (
@@ -3591,9 +3602,9 @@ function AppContent({ user }) {
                           <Flame size={10} color={tier.color} fill={tier.color} /> {h.streak}{tier.label && <span style={{ opacity: 0.8 }}>· {tier.label}</span>}
                         </span>
                       )}
-                      {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 30, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
+                      {habitXpPop && habitXpPop.id === h.id && <div className="xp-pop" style={{ position: "absolute", right: 10, top: -2, fontWeight: 700, fontSize: 11, color: accent, fontFamily: "ui-monospace, Menlo, monospace" }}>+{habitXpPop.xp} XP</div>}
                     </div>
-                    <div style={{ display: "flex", gap: 3, paddingLeft: 21 }}>
+                    <div style={{ display: "flex", gap: 3 }}>
                       {dots.map((d, i) => (
                         <div key={d.date} title={`${DAYS[i].label} — ${d.date}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                           <span style={{ fontSize: 7, fontWeight: 700, color: d.isToday ? (tier.color || accent) : "#4A5563" }}>{DAYS[i].label[0]}</span>
@@ -3601,10 +3612,11 @@ function AppContent({ user }) {
                         </div>
                       ))}
                     </div>
+                    </div>
                   </div>
                 );
               })}
-              <button onClick={openAddHabitModal} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "none", border: "1.5px dashed #33414F", borderRadius: 6, padding: "4px 8px", minHeight: 38, color: "#5C6773", cursor: "pointer" }}>
+              <button onClick={openAddHabitModal} className="qlog-btn" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, background: "none", border: "1.5px dashed #33414F", borderRadius: 6, padding: "4px 8px", minHeight: 58, color: "#5C6773", cursor: "pointer" }}>
                 <Plus size={14} color="#5C6773" /> <span style={{ fontSize: 12, fontWeight: 600 }}>Add habit</span>
               </button>
             </div>
