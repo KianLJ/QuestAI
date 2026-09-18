@@ -987,6 +987,12 @@ function AppContent({ user }) {
   const dragIdRef = useRef(null);
   const [confettiPieces, setConfettiPieces] = useState([]);
   const saveTimer = useRef(null);
+  // Guards against out-of-order writes: if an older in-flight save (e.g. from
+  // just before a workout finished) resolves *after* a newer one, its echo via
+  // the real-time subscribe handler below must not be allowed to clobber the
+  // newer state back to stale values — every payload carries a savedAt, and
+  // any incoming update older than the last one applied is ignored.
+  const lastSyncVersion = useRef(0);
 
   // ---- Load ----
   useEffect(() => {
@@ -1079,6 +1085,7 @@ function AppContent({ user }) {
           { id: Date.now() + 0.3, name: "Wash face", streak: 0, lastCompletedDate: null, totalCompletions: 0, undo: null, deadlineTime: null },
         ]);
       }
+      lastSyncVersion.current = data?.savedAt || 0;
       setLoaded(true);
     })();
   }, []);
@@ -1088,11 +1095,14 @@ function AppContent({ user }) {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
+      const savedAt = Date.now();
+      lastSyncVersion.current = savedAt;
       try {
         await window.storage.set(STORAGE_KEY, JSON.stringify({
           quests, totalXP, gold, streak, lastActiveDate, weekStart, weeklyBossId, inventory, equipped, playerStats, statHistory, shifts,
           habits, habitPerfectDayDate, dailyCrateClaimedDate, claimedRankTiers, calView, pendingBattle, battleState, focus,
           workoutPlans, workoutSchedule, workoutSession, workoutHistory, customExercises, autoRestTimer, exerciseGuides,
+          savedAt,
         }));
       } catch (e) { console.error("save failed", e); }
     }, 150);
@@ -1105,6 +1115,13 @@ function AppContent({ user }) {
       if (key !== STORAGE_KEY) return;
       try {
         const data = JSON.parse(value);
+        // Reject stale/out-of-order deliveries — an older in-flight save (e.g.
+        // queued just before a workout finished) can resolve after a newer one
+        // completes, and without this guard its echo would silently revert
+        // state (level, ranks, workout completion) back to the older values.
+        const incomingVersion = data.savedAt || 0;
+        if (incomingVersion < lastSyncVersion.current) return;
+        lastSyncVersion.current = incomingVersion;
         // Apply remote state — same migration logic as the initial load
         const nowMonday = getMondayISO();
         const dayKeyMap = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 };
@@ -2743,6 +2760,21 @@ function AppContent({ user }) {
 
 
   // ---- Render ----
+  // Before the async load resolves, every piece of state is still at its
+  // freshly-mounted default (0 XP, no quests, no habits...) — rendering the
+  // real app during that window flashes an empty/"reset" UI before the real
+  // data pops in. Show a lightweight loading screen instead until it's ready.
+  if (!loaded) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#141C27", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <style>{`@keyframes qlogLoadPulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }`}</style>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+          <Sword size={32} color={accent} style={{ animation: "qlogLoadPulse 1.1s ease-in-out infinite" }} />
+          <span style={{ fontSize: 13, color: "#8A8578", fontFamily: "Georgia, serif" }}>Quest Log</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="safe-top qlog-app-shell" style={{ minHeight: "100vh", background: themePersonality.bgBase, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#EDE4D3", paddingBottom: 84, "--accent-card-hover": accent + "40" }}>
       <style>{`
@@ -3035,7 +3067,7 @@ function AppContent({ user }) {
 
       {/* Floating timer */}
       {focus && focus.started && !focusOpen && (
-        <button onClick={() => setFocusOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom, 0px))", right: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${timerColor}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
+        <button onClick={() => setFocusOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(76px + env(safe-area-inset-bottom, 0px))", right: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${timerColor}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
           <Timer size={16} color={timerColor} className={focus.secondsLeft === 0 ? "pulse" : ""} />
           <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: timerColor, fontSize: "calc(14px * var(--ui-scale, 1))" }}>{focus.secondsLeft === 0 ? "Time's up" : fmtTime(focus.secondsLeft)}</span>
           <span style={{ fontSize: "calc(11px * var(--ui-scale, 1))", color: "#8A8578", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{focus.title}</span>
@@ -3074,7 +3106,7 @@ function AppContent({ user }) {
 
       {/* Floating workout session pill */}
       {workoutSession && !sessionOverlayOpen && (
-        <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom, 0px))", left: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
+        <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(76px + env(safe-area-inset-bottom, 0px))", left: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
           <IconDumbbell size={16} color={accent} />
           <span style={{ fontSize: "calc(12px * var(--ui-scale, 1))", fontWeight: 700, color: "#EDE4D3", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workoutSession.planName}</span>
           {workoutSession.restTimer && <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: accent, fontSize: "calc(12px * var(--ui-scale, 1))" }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>}
