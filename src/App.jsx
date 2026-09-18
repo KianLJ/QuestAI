@@ -2669,7 +2669,7 @@ function AppContent({ user }) {
 
       {/* ---- BATTLE PENDING BANNER ---- */}
       {pendingBattle && !battleState && (
-        <div style={{ position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)", zIndex: 65, background: "linear-gradient(135deg, #8A2E44, #232E3D)", border: "1px solid #8A2E44", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 6px 24px rgba(0,0,0,0.5)", cursor: "pointer", whiteSpace: "nowrap" }} onClick={startBattle}>
+        <div style={{ position: "fixed", bottom: "calc(80px + env(safe-area-inset-bottom, 0px))", left: "50%", transform: "translateX(-50%)", zIndex: 65, background: "linear-gradient(135deg, #8A2E44, #232E3D)", border: "1px solid #8A2E44", borderRadius: 12, padding: "12px 20px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 6px 24px rgba(0,0,0,0.5)", cursor: "pointer", whiteSpace: "nowrap" }} onClick={startBattle}>
           <span style={{ fontSize: 20 }}>⚔</span>
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#EDE4D3" }}>Weekly Battle Ready!</div>
@@ -2830,7 +2830,7 @@ function AppContent({ user }) {
 
       {/* Floating timer */}
       {focus && focus.started && !focusOpen && (
-        <button onClick={() => setFocusOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: 20, right: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${timerColor}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
+        <button onClick={() => setFocusOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom, 0px))", right: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${timerColor}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
           <Timer size={16} color={timerColor} className={focus.secondsLeft === 0 ? "pulse" : ""} />
           <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: timerColor, fontSize: 14 }}>{focus.secondsLeft === 0 ? "Time's up" : fmtTime(focus.secondsLeft)}</span>
           <span style={{ fontSize: 11, color: "#8A8578", maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{focus.title}</span>
@@ -2869,7 +2869,7 @@ function AppContent({ user }) {
 
       {/* Floating workout session pill */}
       {workoutSession && !sessionOverlayOpen && (
-        <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: 20, left: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
+        <button onClick={() => setSessionOverlayOpen(true)} className="qlog-btn" style={{ position: "fixed", bottom: "calc(20px + env(safe-area-inset-bottom, 0px))", left: 20, zIndex: 55, display: "flex", alignItems: "center", gap: 8, background: "#232E3D", border: `1.5px solid ${accent}`, borderRadius: 30, padding: "10px 16px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,0,0,0.4)" }}>
           <IconDumbbell size={16} color={accent} />
           <span style={{ fontSize: 12, fontWeight: 700, color: "#EDE4D3", maxWidth: 110, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{workoutSession.planName}</span>
           {workoutSession.restTimer && <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: accent, fontSize: 12 }}>{fmtTime(workoutSession.restTimer.secondsLeft)}</span>}
@@ -2878,7 +2878,7 @@ function AppContent({ user }) {
 
       {/* Active workout session overlay */}
       {workoutSession && sessionOverlayOpen && (
-        <div style={{ position: "fixed", inset: 0, background: "#141C27", zIndex: 72, overflowY: "auto", padding: "16px 14px 100px" }}>
+        <div style={{ position: "fixed", inset: 0, background: "#141C27", zIndex: 72, overflowY: "auto", padding: "16px 14px 100px", paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <button onClick={() => setSessionOverlayOpen(false)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A8578", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}><ChevronLeft size={16} /> Minimize</button>
             <button onClick={() => setDiscardConfirmOpen(true)} className="qlog-btn" style={{ background: "none", border: "none", color: "#8A2E44", cursor: "pointer", fontSize: 12 }}>Discard</button>
@@ -5125,7 +5125,7 @@ function AppContent({ user }) {
       {/* Floating Add-Quest / Brain-Dump menu — only on Home/Quests, where "add a quest" is meaningful */}
       {(activeTab === "home" || activeTab === "quests") && (<>
         {fabMenuOpen && activeTab === "quests" && (
-          <div style={{ position: "fixed", right: 16, bottom: 148, zIndex: 61, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ position: "fixed", right: 16, bottom: "calc(148px + env(safe-area-inset-bottom, 0px))", zIndex: 61, display: "flex", flexDirection: "column", gap: 8 }}>
             <button onClick={() => { setAddDate(selectedDate); setAddModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: accent, border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 13, color: "#1B2430", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><Plus size={15} /> Add Quest</button>
             <button onClick={() => { setDumpModalOpen(true); setFabMenuOpen(false); }} className="qlog-btn" style={{ display: "flex", alignItems: "center", gap: 6, background: "#232E3D", border: "1px solid #33414F", borderRadius: 8, padding: "10px 14px", fontWeight: 600, fontSize: 13, color: "#EDE4D3", cursor: "pointer", whiteSpace: "nowrap", boxShadow: "0 4px 14px rgba(0,0,0,0.35)" }}><FileText size={14} /> Brain Dump</button>
           </div>
@@ -5134,7 +5134,7 @@ function AppContent({ user }) {
           onClick={() => { if (activeTab === "home") { setActiveTab("quests"); setFabMenuOpen(false); } else { setFabMenuOpen((v) => !v); } }}
           aria-label="Add"
           className="qlog-btn"
-          style={{ position: "fixed", right: 16, bottom: 76, zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.4)", transform: fabMenuOpen && activeTab === "quests" ? "rotate(45deg)" : "none", transition: "transform 0.15s ease" }}
+          style={{ position: "fixed", right: 16, bottom: "calc(76px + env(safe-area-inset-bottom, 0px))", zIndex: 61, width: 52, height: 52, borderRadius: "50%", background: accent, border: "none", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.4)", transform: fabMenuOpen && activeTab === "quests" ? "rotate(45deg)" : "none", transition: "transform 0.15s ease" }}
         >
           <Plus size={24} color="#1B2430" />
         </button>
