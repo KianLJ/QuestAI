@@ -334,3 +334,59 @@ export async function acceptFriendRequest(requestId) {
 export async function removeFriend(friendUid) {
   return callFriendsApi({ action: "remove", friendUid });
 }
+
+// ---- Exercise challenges ----
+// Both sides award themselves their own XP/gold client-side (never writing to
+// the other person's private data) — the opponent awards on submitting their
+// attempt, the challenger awards next time they view a resolved challenge
+// they sent (see markChallengerClaimed). No admin route needed.
+export async function sendChallenge(toUid, toUsername, exercise, weight, reps, score, dateISO) {
+  const me = auth.currentUser;
+  try {
+    await addDoc(collection(db, "challenges"), {
+      fromUid: me.uid, fromUsername: me.displayName || me.email,
+      toUid, toUsername,
+      exerciseId: exercise.id, exerciseName: exercise.name, equipment: exercise.equipment, primaryMuscle: exercise.primaryMuscle,
+      challengerWeight: weight, challengerReps: reps, challengerScore: score,
+      opponentWeight: null, opponentReps: null, opponentScore: null,
+      status: "pending", winnerUid: null,
+      challengerClaimed: false, opponentClaimed: false,
+      createdAt: serverTimestamp(), date: dateISO,
+    });
+    return { error: null };
+  } catch (e) {
+    return { error: "Couldn't send that challenge — try again." };
+  }
+}
+
+export async function listChallenges() {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return { incoming: [], outgoing: [] };
+  const [incomingSnap, outgoingSnap] = await Promise.all([
+    getDocs(query(collection(db, "challenges"), where("toUid", "==", uid))),
+    getDocs(query(collection(db, "challenges"), where("fromUid", "==", uid))),
+  ]);
+  return {
+    incoming: incomingSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    outgoing: outgoingSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  };
+}
+
+export async function declineChallenge(id) {
+  try { await updateDoc(doc(db, "challenges", id), { status: "declined" }); return { error: null }; }
+  catch (e) { return { error: "Couldn't decline — try again." }; }
+}
+
+export async function submitChallengeAttempt(id, weight, reps, score, winnerUid) {
+  try {
+    await updateDoc(doc(db, "challenges", id), { opponentWeight: weight, opponentReps: reps, opponentScore: score, status: "completed", winnerUid, opponentClaimed: true });
+    return { error: null };
+  } catch (e) {
+    return { error: "Couldn't submit your attempt — try again." };
+  }
+}
+
+export async function markChallengerClaimed(id) {
+  try { await updateDoc(doc(db, "challenges", id), { challengerClaimed: true }); }
+  catch (e) { /* best-effort — will just retry claiming next refresh */ }
+}
